@@ -259,7 +259,7 @@ export function InfoOverlay({
           <div className="mt-3 flex items-center gap-2 border-t border-white/10 pt-3 font-display text-[10px] uppercase tracking-[0.16em] text-white/75">
             <KeyRound size={12} className="text-sonar-300" /> A / D · ← →
             <MousePointer2 size={12} className="ml-2 text-sonar-300" /> свайп пальцем или мышью
-            <span className="ml-auto">Esc — пауза</span>
+            <span className="ml-auto">Пробел — пауза</span>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/10 pt-3">

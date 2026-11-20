@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Sound } from './Sound';
-import { buildSparkRig, type SparkRig } from './sparkSkins';
+import { STAR_PERIOD, buildSparkRig, type SparkRig } from './sparkSkins';
 import { skinById, type Skin } from './state';
 import { THEMES, themeById, type Theme, type LoadoutFx, emptyFx } from './economy';
 import {
@@ -132,6 +132,7 @@ interface SharedEntityAssets {
 
 const TUNNEL_R = 5;
 const PLAYER_R = 4.0;
+const STAR_DUST = [0xffd166, 0x6ef7d8, 0xd4b8ff, 0xffffff];
 const PLAYER_SCALE = 0.85; // искра и все её модельки на 15% меньше
 const RING_COUNT = 32; // 4 тайла стены по 8 колец: ритм рёбер и текстура всегда совпадают
 const RING_GAP = 8;
@@ -321,6 +322,10 @@ export class Engine {
   private magnetPop = 0;
   private magnetSpawnT = 0;
   private emberT = 0;
+  private novaPhase = -1;
+  // «Нулевая точка»: бегущие волны гравитации и рябь при сборе
+  private zeroWaves: THREE.Mesh[] = [];
+  private zeroRipples: { mesh: THREE.Mesh; t: number }[] = [];
   private auraMesh: THREE.Mesh;
   private trail: THREE.Sprite[] = [];
 
@@ -767,6 +772,29 @@ export class Engine {
       s.scale.setScalar((1.65 - i * 0.12) * PLAYER_SCALE);
       this.scene.add(s);
       this.trail.push(s);
+    }
+
+    // Эффекты тоннеля «Нулевая точка» (видны только в нём)
+    const waveGeo = new THREE.TorusGeometry(TUNNEL_R - 0.12, 0.03, 4, 96);
+    for (let i = 0; i < 3; i++) {
+      const w = new THREE.Mesh(
+        waveGeo,
+        new THREE.MeshBasicMaterial({ color: 0xdfe3ec, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
+      );
+      w.position.z = -i * 70;
+      w.visible = false;
+      this.scene.add(w);
+      this.zeroWaves.push(w);
+    }
+    const rippleGeo = new THREE.RingGeometry(0.92, 1, 56);
+    for (let i = 0; i < 3; i++) {
+      const mesh = new THREE.Mesh(
+        rippleGeo,
+        new THREE.MeshBasicMaterial({ color: 0xe9ecf2, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
+      );
+      mesh.visible = false;
+      this.scene.add(mesh);
+      this.zeroRipples.push({ mesh, t: 1 });
     }
 
     // Пул частиц
@@ -1685,16 +1713,84 @@ export class Engine {
 
   private spawnEmber() {
     const pPos = this.player.position;
+    const star = this.skin.shape === 'star';
     for (const p of this.particles) {
       if (p.sprite.visible) continue;
       p.sprite.visible = true;
+      const m = p.sprite.material as THREE.SpriteMaterial;
+      if (star) {
+        // «Звёздная пыль»: мелкие разноцветные искры по спирали вокруг ядра
+        const a = Math.random() * Math.PI * 2;
+        const r = 0.28 + Math.random() * 0.2;
+        p.sprite.position.set(pPos.x + Math.cos(a) * r, pPos.y + Math.sin(a) * r, pPos.z + 0.2);
+        m.color.setHex(STAR_DUST[Math.floor(Math.random() * STAR_DUST.length)]);
+        m.opacity = 0.95;
+        const tang = 1.4 + Math.random() * 1.2;
+        p.vel.set(-Math.sin(a) * tang + Math.cos(a) * 0.9, Math.cos(a) * tang + Math.sin(a) * 0.9, 4.5 + Math.random() * 3);
+        p.maxLife = p.life = 0.45 + Math.random() * 0.3;
+        p.sprite.scale.setScalar(0.1 + Math.random() * 0.14);
+        return;
+      }
       p.sprite.position.set(pPos.x + (Math.random() - 0.5) * 0.28, pPos.y + (Math.random() - 0.5) * 0.28, pPos.z + 0.2);
-      (p.sprite.material as THREE.SpriteMaterial).color.setHex(this.skin.trail);
-      (p.sprite.material as THREE.SpriteMaterial).opacity = 0.85;
+      m.color.setHex(this.skin.trail);
+      m.opacity = 0.85;
       p.vel.set((Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5, 5 + Math.random() * 3);
       p.maxLife = p.life = 0.34 + Math.random() * 0.22;
       p.sprite.scale.setScalar(0.2 + Math.random() * 0.18);
       return;
+    }
+  }
+
+  /** Кольцо искр в момент ударной волны «Сверхновой». */
+  private spawnZeroRipple(pos: THREE.Vector3) {
+    const r = this.zeroRipples.find((x) => x.t >= 1) ?? this.zeroRipples[0];
+    r.t = 0;
+    r.mesh.position.set(pos.x, pos.y, pos.z + 0.3);
+    r.mesh.visible = true;
+  }
+
+  /** Атмосфера «Нулевой точки»: волны гравитации вдоль тоннеля и рябь от сбора светлячков. */
+  private updateZeroFx(dt: number) {
+    const on = this.theme.id === 'zero';
+    const speed = 44 + (this.running ? this.speed * 0.8 : 0);
+    for (const w of this.zeroWaves) {
+      w.visible = on;
+      if (!on) continue;
+      w.position.z += speed * dt;
+      if (w.position.z > 9) w.position.z -= 210;
+      const z = w.position.z;
+      const fadeIn = Math.min(1, Math.max(0, (z + 190) / 60));
+      const fadeOut = Math.min(1, Math.max(0, (9 - z) / 12));
+      (w.material as THREE.MeshBasicMaterial).opacity = 0.5 * fadeIn * fadeOut;
+    }
+    for (const r of this.zeroRipples) {
+      if (r.t >= 1) {
+        r.mesh.visible = false;
+        continue;
+      }
+      r.t = Math.min(1, r.t + dt * 1.7);
+      r.mesh.scale.setScalar(0.5 + r.t * 2.1);
+      (r.mesh.material as THREE.MeshBasicMaterial).opacity = Math.pow(1 - r.t, 2) * 0.75;
+    }
+  }
+
+  private spawnNovaBurst() {
+    const pPos = this.player.position;
+    const n = 14;
+    let k = 0;
+    for (const p of this.particles) {
+      if (k >= n) break;
+      if (p.sprite.visible) continue;
+      p.sprite.visible = true;
+      const a = (k / n) * Math.PI * 2 + Math.random() * 0.2;
+      const m = p.sprite.material as THREE.SpriteMaterial;
+      m.color.setHex(STAR_DUST[k % STAR_DUST.length]);
+      m.opacity = 1;
+      p.sprite.position.set(pPos.x + Math.cos(a) * 0.4, pPos.y + Math.sin(a) * 0.4, pPos.z + 0.1);
+      p.vel.set(Math.cos(a) * 3.6, Math.sin(a) * 3.6, 2.2);
+      p.maxLife = p.life = 0.55 + Math.random() * 0.2;
+      p.sprite.scale.setScalar(0.16 + Math.random() * 0.1);
+      k++;
     }
   }
 
@@ -1862,6 +1958,7 @@ export class Engine {
     const k = Math.max(0, this.light) / MAX_LIGHT;
     this.updateRibLook(k);
     this.updateCore(k, dt);
+    this.updateZeroFx(dt);
 
     const spos = this.streaks.geometry.getAttribute('position') as THREE.BufferAttribute;
     const arr = spos.array as Float32Array;
@@ -1961,7 +2058,12 @@ export class Engine {
             const mult = Math.min(this.combo, 10) * (this.flowT > 0 ? 1.5 : 1);
             const gain = 10 * mult * this.fx.scoreMult;
             this.score += gain;
-            this.emit(pPos, 0xffe08a, 8 + Math.min(mult, 7));
+            if (this.theme.id === 'zero') {
+              this.emit(pPos, 0xf2f4f8, 8 + Math.min(mult, 7));
+              this.spawnZeroRipple(pPos);
+            } else {
+              this.emit(pPos, 0xffe08a, 8 + Math.min(mult, 7));
+            }
             this.sound.pickup(this.combo, this.combo >= 10);
             if (mult === 5 || mult === 10) this.showPopup(`×${mult} КОМБО`, 0xffd166, pPos, mult >= 10);
           } else if (e.kind === 'shard' || e.kind === 'wall' || e.kind === 'drifter') {
@@ -2099,7 +2201,7 @@ export class Engine {
     this.sparkRig.update(dt, this.time, k * flicker, d);
 
     const glowMat = this.playerGlow.material as THREE.SpriteMaterial;
-    this.playerGlow.scale.setScalar(2.1 + k * 1.65 + Math.sin(this.time * 7) * 0.13 + this.flashFx * 3.0);
+    this.playerGlow.scale.setScalar((2.1 + k * 1.65 + Math.sin(this.time * 7) * 0.13) * (this.skin.shape === 'star' ? 0.82 : 1) + this.flashFx * 3.0);
     glowMat.opacity = (0.45 + k * 0.55) * flicker;
     glowMat.color.setHex(this.magnetT > 0 ? 0xd9c6ff : 0xffffff);
     glowMat.rotation = this.time * 0.25;
@@ -2156,8 +2258,21 @@ export class Engine {
     if (this.skin.shape === 'flame' || this.skin.shape === 'star') {
       this.emberT -= dt;
       if (this.emberT <= 0) {
-        this.emberT = this.skin.shape === 'flame' ? 0.14 : 0.24;
+        this.emberT = this.skin.shape === 'flame' ? 0.14 : 0.07;
         this.spawnEmber();
+      }
+    }
+    if (this.skin.shape === 'star') {
+      // Ударная волна в такт с кольцами на модели + радужный шлейф
+      const ph = Math.floor(this.time / STAR_PERIOD);
+      if (ph !== this.novaPhase) {
+        this.novaPhase = ph;
+        this.spawnNovaBurst();
+      }
+      for (let i = 0; i < this.trail.length; i++) {
+        const hue = (this.time * 0.12 + i * 0.045) % 1;
+        const tc = (this.trail[i].material as THREE.SpriteMaterial).color;
+        tc.setHSL(0.1 + 0.5 * (0.5 + 0.5 * Math.sin(hue * Math.PI * 2)), 0.85, 0.62);
       }
     }
 
@@ -2207,6 +2322,7 @@ export class Engine {
     }
     this.updateRibLook(1);
     this.updateCore(1, dt);
+    this.updateZeroFx(dt);
 
     const spos = this.streaks.geometry.getAttribute('position') as THREE.BufferAttribute;
     const arr = spos.array as Float32Array;

@@ -153,22 +153,21 @@ export const TUNNEL_LOOKS: Record<string, TunnelLook> = {
     streak: { color: 0xdff2ff, gain: 0.9 },
     windows: 0,
   },
-  // 8. Нулевая точка — обсидиан с побежалостью: тонкие спектральные нити, переливающаяся кромка,
-  //    сингулярность в конце тоннеля (белое ядро, лучи и кольцо аккреции)
+  // 8. Нулевая точка — графит и чёрный металл: тонкие серые линии, матовые вставки,
+  //    без цвета и ромбов. В конце — тусклая сингулярность; в игре включаются свои эффекты.
   zero: {
     panel: 'zero',
     ribPattern: 'GmMmimMmGmMmimMm',
     ribShape: 'round',
-    ribColors: { body: 0x07080f, edge: 0xf2f6ff, accent: 0xa9b8ff, dim: 0x3a4272 },
-    halo: 0.11,
-    hueSway: { from: 0.5, to: 0.86, speed: 0.2 },
-    beams: { count: 6, width: 0.035 },
-    ambient: { color: 0xb8c4ff, intensity: 0.85 },
-    playerLight: 1.25,
-    fog: 0.0105,
-    core: { color: 0xf4f7ff, size: 16, opacity: 1.0, rays: 0.5, ring: 0.75 },
-    dust: { n: 34, size: 0.055, opacity: 0.55, colors: [0xffffff, 0xa8c4ff, 0xd8a8ff, 0x9ff4ff] },
-    streak: { color: 0xe4ecff, gain: 0.85 },
+    ribColors: { body: 0x040405, edge: 0xaeb3bd, accent: 0x5b606b, dim: 0x24262c },
+    halo: 0.035,
+    beams: { count: 6, width: 0.022 },
+    ambient: { color: 0x9aa0ad, intensity: 0.72 },
+    playerLight: 1.2,
+    fog: 0.0125,
+    core: { color: 0xc4c9d4, size: 13, opacity: 0.6, rays: 0.18, ring: 0.5 },
+    dust: { n: 30, size: 0.05, opacity: 0.5, colors: [0xffffff, 0x9ca1ac, 0x6c717c] },
+    streak: { color: 0xc9ced8, gain: 0.8 },
     windows: 0,
   },
 };
@@ -757,155 +756,136 @@ const paintCrystal: Painter = (c, p) => {
   floorShade(c, 0.5);
 };
 
-/** Спектральный градиент «побежалости» по окружности тайла — бесшовный (на краях совпадает). */
-function spectrumGrad(c: Ctx, alpha: number): CanvasGradient {
-  const g = c.createLinearGradient(0, 0, TW, 0);
-  const stops: [number, string][] = [
-    [0, `rgba(120,236,255,${alpha})`],
-    [0.2, `rgba(130,160,255,${alpha})`],
-    [0.4, `rgba(196,140,255,${alpha})`],
-    [0.5, `rgba(255,230,250,${alpha})`],
-    [0.6, `rgba(255,140,216,${alpha})`],
-    [0.8, `rgba(150,170,255,${alpha})`],
-    [1, `rgba(120,236,255,${alpha})`],
-  ];
-  for (const [o, col] of stops) g.addColorStop(o, col);
-  return g;
-}
-
-function specLine(c: Ctx, x0: number, y0: number, x1: number, y1: number, w: number, alpha: number, blur: number) {
-  c.save();
-  c.strokeStyle = spectrumGrad(c, 1);
-  c.lineWidth = w;
-  c.globalAlpha = alpha;
-  c.shadowColor = 'rgba(190,200,255,0.9)';
-  c.shadowBlur = blur;
-  c.beginPath();
-  c.moveTo(x0, y0);
-  c.lineTo(x1, y1);
-  c.stroke();
-  c.restore();
-}
-
 /**
- * «Нулевая точка» — обсидиановая обшивка: глянцевые скошенные плиты, внутри каждой — тонкая
- * спектральная инкрустация-ромб (побежалость), шов секции — двойная световая нить.
+ * «Нулевая точка» — графитовая обшивка: матовые почти чёрные плиты, серые вставки-модули
+ * (планки, тонкие линии, скобы, перфорация) и тонкие светлые швы. Никаких цветов и ромбов.
  */
 const paintZero: Painter = (c, p) => {
-  hGrad(c, [[0, '#020208'], [0.22, p.a], [0.5, '#1a1f38'], [0.78, p.a], [1, '#020208']]);
+  hGrad(c, [[0, '#010102'], [0.25, p.a], [0.5, '#101217'], [0.75, p.a], [1, '#010102']]);
+  const rnd = mulberry(0x2e70);
 
-  // Крупные глянцевые плиты 128×128 со скосом и диагональным бликом
+  // Матовые плиты 128×128: почти чёрные, с тонкой серой фаской
   for (let col = 0; col < 8; col++) {
     for (let bay = 0; bay < BAYS; bay++) {
-      const x = col * 128 + 6;
-      const y = bay * BAY + 6;
-      const s = 116;
+      const x = col * 128 + 5;
+      const y = bay * BAY + 5;
+      const s = 118;
       const k = ceilK(x + s / 2);
       const g = c.createLinearGradient(x, y, x + s, y + s);
-      g.addColorStop(0, `rgba(190,205,255,${0.1 * k + 0.02})`);
-      g.addColorStop(0.42, 'rgba(120,140,220,0.02)');
-      g.addColorStop(0.58, 'rgba(0,0,0,0.12)');
-      g.addColorStop(1, 'rgba(0,0,0,0.42)');
+      g.addColorStop(0, `rgba(150,156,170,${0.05 * k + 0.012})`);
+      g.addColorStop(0.5, 'rgba(0,0,0,0.0)');
+      g.addColorStop(1, 'rgba(0,0,0,0.5)');
       c.fillStyle = g;
-      rrect(c, x, y, s, s, 7);
+      rrect(c, x, y, s, s, 3);
       c.fill();
-      // фаска: светлая сверху-слева, тёмная снизу-справа
-      c.lineWidth = 1.5;
-      c.strokeStyle = `rgba(215,228,255,${0.1 + 0.2 * k})`;
-      c.beginPath();
-      c.moveTo(x + 7, y + 0.8);
-      c.lineTo(x + s - 7, y + 0.8);
-      c.moveTo(x + 0.8, y + 7);
-      c.lineTo(x + 0.8, y + s - 7);
-      c.stroke();
-      c.strokeStyle = 'rgba(0,0,0,0.55)';
-      c.beginPath();
-      c.moveTo(x + 7, y + s - 0.8);
-      c.lineTo(x + s - 7, y + s - 0.8);
-      c.moveTo(x + s - 0.8, y + 7);
-      c.lineTo(x + s - 0.8, y + s - 7);
+      c.lineWidth = 1;
+      c.strokeStyle = `rgba(150,156,168,${0.07 + 0.1 * k})`;
+      rrect(c, x + 0.5, y + 0.5, s - 1, s - 1, 3);
       c.stroke();
     }
   }
 
-  // Спектральная инкрустация: ромб в ромбе и светящаяся точка по центру каждой плиты
+  // Серые вставки — разные «модули» плит (выбор детерминированный, без повторяющегося рисунка)
   for (let col = 0; col < 8; col++) {
     for (let bay = 0; bay < BAYS; bay++) {
-      const cx = col * 128 + 64;
-      const cy = bay * BAY + 64;
-      const k = ceilK(cx);
-      const diamond = (r: number, w: number, a: number, blur: number) => {
-        c.save();
-        c.strokeStyle = spectrumGrad(c, 1);
-        c.lineWidth = w;
-        c.globalAlpha = a * k;
-        c.shadowColor = 'rgba(180,200,255,0.9)';
-        c.shadowBlur = blur;
-        c.beginPath();
-        c.moveTo(cx, cy - r);
-        c.lineTo(cx + r, cy);
-        c.lineTo(cx, cy + r);
-        c.lineTo(cx - r, cy);
-        c.closePath();
-        c.stroke();
-        c.restore();
-      };
-      diamond(40, 1.6, 0.7, 6);
-      diamond(19, 1.2, 0.5, 4);
+      const x = col * 128;
+      const y = bay * BAY;
+      const k = ceilK(x + 64);
+      const kind = Math.floor(rnd() * 6);
       c.save();
-      c.fillStyle = '#ffffff';
-      c.globalAlpha = 0.85 * k;
-      c.shadowColor = '#cfdcff';
-      c.shadowBlur = 8;
-      c.beginPath();
-      c.arc(cx, cy, 2.4, 0, Math.PI * 2);
-      c.fill();
+      if (kind === 0) {
+        // вертикальная графитовая вставка со светлой кромкой
+        c.fillStyle = `rgba(70,74,84,${0.5 * k + 0.1})`;
+        c.fillRect(x + 54, y + 16, 20, 96);
+        c.strokeStyle = `rgba(200,205,215,${0.25 * k + 0.08})`;
+        c.lineWidth = 1;
+        c.strokeRect(x + 54.5, y + 16.5, 19, 95);
+      } else if (kind === 1) {
+        // три горизонтальные тонкие линии
+        c.strokeStyle = `rgba(190,196,208,${0.3 * k + 0.08})`;
+        c.lineWidth = 1;
+        for (let i = 0; i < 3; i++) {
+          const yy = y + 46 + i * 14;
+          c.beginPath();
+          c.moveTo(x + 24, yy);
+          c.lineTo(x + 104 - i * 18, yy);
+          c.stroke();
+        }
+      } else if (kind === 2) {
+        // широкая серая планка + тонкая линия под ней
+        c.fillStyle = `rgba(88,92,102,${0.36 * k + 0.08})`;
+        c.fillRect(x + 22, y + 52, 84, 10);
+        c.fillStyle = `rgba(220,225,235,${0.35 * k + 0.1})`;
+        c.fillRect(x + 22, y + 52, 84, 1);
+        c.fillRect(x + 22, y + 70, 56, 1);
+      } else if (kind === 3) {
+        // уголки-скобы
+        c.strokeStyle = `rgba(200,205,216,${0.32 * k + 0.1})`;
+        c.lineWidth = 1.2;
+        const L = 14;
+        const m = 20;
+        for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+          const px = x + (sx ? 128 - m : m);
+          const py = y + (sy ? 128 - m : m);
+          const dx = sx ? -L : L;
+          const dy = sy ? -L : L;
+          c.beginPath();
+          c.moveTo(px + dx, py);
+          c.lineTo(px, py);
+          c.lineTo(px, py + dy);
+          c.stroke();
+        }
+      } else if (kind === 4) {
+        // перфорация: ряд узких вертикальных прорезей
+        c.fillStyle = `rgba(0,0,0,0.65)`;
+        c.strokeStyle = `rgba(170,176,190,${0.22 * k + 0.06})`;
+        c.lineWidth = 0.8;
+        for (let i = 0; i < 6; i++) {
+          const xx = x + 28 + i * 14;
+          c.fillRect(xx, y + 40, 4, 48);
+          c.strokeRect(xx + 0.4, y + 40.4, 3.2, 47.2);
+        }
+      }
+      // kind === 5: чистая плита без вставки
       c.restore();
     }
   }
 
-  // Продольные нити между рядами плит
-  for (const x of [256, 384, 512, 640, 768]) {
-    glowLine(c, x, 0, x, TH, '#dfe8ff', 1, 0.14 + 0.16 * ceilK(x), 3);
+  // Продольные тонкие серые нити между рядами плит
+  for (const x of [128, 256, 384, 512, 640, 768, 896]) {
+    glowLine(c, x, 0, x, TH, '#9ca1ac', 1, 0.1 + 0.14 * ceilK(x), 0);
   }
-  specLine(c, 512, 0, 512, TH, 1.4, 0.35, 6);
+  glowLine(c, 512, 0, 512, TH, '#d4d8e0', 1, 0.22, 3);
 
-  // Швы секций: сильные — широкая подсветка + двойная белая/спектральная нить, слабые — тонкая нить
+  // Швы секций: сильные — тонкая светлая линия с мягким серым ореолом, слабые — едва заметная нить
   for (let b = 0; b <= BAYS; b++) {
     const y = b * BAY;
     const strong = b % 2 === 0;
     const draw = (yy: number) => {
       if (strong) {
-        const g = c.createLinearGradient(0, yy - 30, 0, yy + 30);
-        g.addColorStop(0, 'rgba(200,215,255,0)');
-        g.addColorStop(0.5, 'rgba(200,215,255,0.16)');
-        g.addColorStop(1, 'rgba(200,215,255,0)');
+        const g = c.createLinearGradient(0, yy - 22, 0, yy + 22);
+        g.addColorStop(0, 'rgba(150,156,170,0)');
+        g.addColorStop(0.5, 'rgba(150,156,170,0.12)');
+        g.addColorStop(1, 'rgba(150,156,170,0)');
         c.fillStyle = g;
-        c.fillRect(0, yy - 30, TW, 60);
-        glowLine(c, 0, yy, TW, yy, '#ffffff', 1.8, 0.85, 7);
-        specLine(c, 0, yy - 7, TW, yy - 7, 1.3, 0.7, 5);
-        specLine(c, 0, yy + 7, TW, yy + 7, 1.3, 0.7, 5);
-        // световые «заклёпки» на стыках плит
+        c.fillRect(0, yy - 22, TW, 44);
+        glowLine(c, 0, yy, TW, yy, '#e6e9ef', 1.3, 0.7, 4);
+        glowLine(c, 0, yy - 6, TW, yy - 6, '#8a8f9b', 1, 0.35, 0);
+        glowLine(c, 0, yy + 6, TW, yy + 6, '#8a8f9b', 1, 0.35, 0);
+        // маленькие квадратные метки на стыках плит
         for (let col = 1; col < 8; col++) {
           const px = col * 128;
-          c.save();
-          c.fillStyle = '#ffffff';
-          c.globalAlpha = 0.35 + 0.6 * ceilK(px);
-          c.shadowColor = '#bcd0ff';
-          c.shadowBlur = 8;
-          c.beginPath();
-          c.arc(px, yy, 3, 0, Math.PI * 2);
-          c.fill();
-          c.restore();
+          c.fillStyle = `rgba(230,234,242,${0.3 + 0.5 * ceilK(px)})`;
+          c.fillRect(px - 1.5, yy - 1.5, 3, 3);
         }
       } else {
-        glowLine(c, 0, yy, TW, yy, '#cfdcff', 1, 0.22, 3);
+        glowLine(c, 0, yy, TW, yy, '#9ca1ac', 1, 0.18, 0);
       }
     };
     draw(y);
     if (y === 0) draw(TH);
   }
-  floorShade(c, 0.6);
+  floorShade(c, 0.65);
 };
 
 const PAINTERS: Record<PanelKind, Painter> = {

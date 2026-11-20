@@ -70,6 +70,37 @@ function ridged3(x: number, y: number, z: number, seed: number, octaves = 3): nu
   return v / norm;
 }
 
+/** 3D-Вороной: расстояния до двух ближайших опорных точек + id ближайшей ячейки (для огранки кристалла). */
+function voronoi3(x: number, y: number, z: number, seed: number): [number, number, number] {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const iz = Math.floor(z);
+  let f1 = 9;
+  let f2 = 9;
+  let id = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = ix + dx;
+        const cy = iy + dy;
+        const cz = iz + dz;
+        const px = cx + hash3(cx, cy, cz, seed + 1);
+        const py = cy + hash3(cx, cy, cz, seed + 2);
+        const pz = cz + hash3(cx, cy, cz, seed + 3);
+        const d = Math.hypot(px - x, py - y, pz - z);
+        if (d < f1) {
+          f2 = f1;
+          f1 = d;
+          id = hash3(cx, cy, cz, seed + 4);
+        } else if (d < f2) {
+          f2 = d;
+        }
+      }
+    }
+  }
+  return [f1, f2, id];
+}
+
 function unpackRgb(hex: number): [number, number, number] {
   return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
 }
@@ -273,26 +304,28 @@ function buildCoreAndVeilCanvases(skin: Skin): { coreCanvas: HTMLCanvasElement; 
         vb = 255;
         va = Math.min(255, runeVeil * 225);
       } else {
-        // Сверхновая (star): бриллиантовое сердце с радужными золотисто-бирюзовыми потоками
-        const w = fbm3(nx * 2.3, ny * 2.3, nz * 2.3, seed, 3) * 1.25;
-        const fusion = fbm3(nx * 3.4 + w, ny * 3.4 - w, nz * 3.4, seed + 37, 4);
-        const prism = Math.pow(ridged3(nx * 4.0, ny * 4.0 + w, nz * 4.0, seed + 73, 3), 2.5);
-        const warmGold: [number, number, number] = [245, 168, 52];
+        // Сверхновая (star): огранённый звёздный кристалл — грани Вороного, светящиеся рёбра, горячее ядро
+        const [f1, f2, cid] = voronoi3(nx * 2.7, ny * 2.7, nz * 2.7, seed);
+        const heat = fbm3(nx * 3.1, ny * 3.1, nz * 3.1, seed + 41, 3);
+        const deepGold: [number, number, number] = [196, 104, 22];
         const aqua: [number, number, number] = [110, 247, 216];
         const lilac: [number, number, number] = [212, 184, 255];
-        let rgb = mixRgb(warmGold, aqua, Math.pow(1 - fusion, 1.8) * 0.55);
-        rgb = mixRgb(rgb, lilac, Math.sin(theta * 2 + phi * 3) * 0.18 + 0.18);
-        rgb = mixRgb(rgb, colMid, fusion * 0.85);
-        rgb = mixRgb(rgb, colCore, Math.min(1, prism * 0.95 + Math.pow(fusion, 2.0) * 0.85));
+        let rgb = mixRgb(deepGold, colMid, 0.25 + cid * 0.75);
+        if (cid > 0.82) rgb = mixRgb(rgb, aqua, 0.62);
+        else if (cid < 0.14) rgb = mixRgb(rgb, lilac, 0.55);
+        const lit = Math.max(0, 1 - f1 * 0.95);
+        rgb = mixRgb(rgb, colCore, Math.pow(lit, 2) * 0.62 + Math.pow(heat, 3) * 0.5);
+        const edge = Math.max(0, 1 - (f2 - f1) / 0.075);
+        rgb = mixRgb(rgb, [255, 255, 255], Math.pow(edge, 1.4) * 0.92);
         r = rgb[0];
         g = rgb[1];
         b = rgb[2];
 
-        const coronaVeil = Math.pow(ridged3(nx * 3.8, ny * 3.8, nz * 3.8, seed + 109, 3), 2.4);
-        vr = 255;
-        vg = 248;
-        vb = 220;
-        va = Math.min(255, coronaVeil * 225);
+        const fine = Math.pow(ridged3(nx * 6.4, ny * 6.4, nz * 6.4, seed + 109, 3), 3.0);
+        vr = 215;
+        vg = 255;
+        vb = 238;
+        va = Math.min(255, fine * 200);
       }
 
       const idx = (py * W + px) * 4;
@@ -327,6 +360,54 @@ function buildCoronaCanvas(skin: Skin): HTMLCanvasElement {
 
   c.clearRect(0, 0, S, S);
 
+  if (skin.shape === 'star') {
+    // Сверхновая: компактное горячее гало + тонкие иглы-лучи (меньше и аккуратнее прежней короны)
+    const g = c.createRadialGradient(half, half, 0, half, half, half * 0.62);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.2, `rgba(${cr},${cg},${cb},0.75)`);
+    g.addColorStop(0.5, `rgba(${gr},${gg},${gb},0.26)`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+    c.save();
+    c.translate(half, half);
+    c.globalCompositeOperation = 'lighter';
+    const needle = (ang: number, len: number, wid: number, alpha: number, col: string) => {
+      c.save();
+      c.rotate(ang);
+      const ng = c.createLinearGradient(-len, 0, len, 0);
+      ng.addColorStop(0, 'rgba(0,0,0,0)');
+      ng.addColorStop(0.5, col.replace('A', String(alpha)));
+      ng.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = ng;
+      c.beginPath();
+      c.moveTo(-len, 0);
+      c.lineTo(0, -wid);
+      c.lineTo(len, 0);
+      c.lineTo(0, wid);
+      c.closePath();
+      c.fill();
+      c.restore();
+    };
+    for (let i = 0; i < 2; i++) needle((i * Math.PI) / 2, half * 0.82, 3.2, 0.85, 'rgba(255,250,225,A)');
+    for (let i = 0; i < 2; i++) needle(Math.PI / 4 + (i * Math.PI) / 2, half * 0.52, 2.2, 0.6, 'rgba(110,247,216,A)');
+    for (let i = 0; i < 4; i++) needle(Math.PI / 8 + (i * Math.PI) / 4, half * 0.34, 1.4, 0.45, 'rgba(255,214,140,A)');
+    // тонкие кольца-дифракции
+    c.globalCompositeOperation = 'lighter';
+    c.strokeStyle = 'rgba(255,232,163,0.34)';
+    c.lineWidth = 1.4;
+    c.beginPath();
+    c.arc(0, 0, half * 0.34, 0, Math.PI * 2);
+    c.stroke();
+    c.strokeStyle = 'rgba(110,247,216,0.3)';
+    c.setLineDash([3, 5]);
+    c.beginPath();
+    c.arc(0, 0, half * 0.5, 0, Math.PI * 2);
+    c.stroke();
+    c.restore();
+    return cvs;
+  }
+
   if (skin.shape === 'void') {
     // Горизонт событий: тёмный центр, яркое фотонное кольцо и мягкое гало
     const g = c.createRadialGradient(half, half, 0, half, half, half);
@@ -355,9 +436,7 @@ function buildCoronaCanvas(skin: Skin): HTMLCanvasElement {
       ? 6
       : skin.shape === 'pulsar'
         ? 4
-        : skin.shape === 'star'
-          ? 8
-          : skin.shape === 'plasma' || skin.shape === 'flame'
+        : skin.shape === 'plasma' || skin.shape === 'flame'
             ? 10
             : 0;
 
@@ -367,7 +446,7 @@ function buildCoronaCanvas(skin: Skin): HTMLCanvasElement {
     c.globalCompositeOperation = 'lighter';
     for (let i = 0; i < rayCount; i++) {
       const a = (i / rayCount) * Math.PI * 2;
-      const major = skin.shape === 'star' || skin.shape === 'pulsar' ? i % 2 === 0 : true;
+      const major = skin.shape === 'pulsar' ? i % 2 === 0 : true;
       const len = half * (major ? 0.94 : 0.66);
       const wid = skin.shape === 'pulsar' ? 5.5 : major ? 7.5 : 4.5;
       c.save();
@@ -389,7 +468,7 @@ function buildCoronaCanvas(skin: Skin): HTMLCanvasElement {
   }
 
   // Тонкое дифракционное кольцо для кристальных и космических форм
-  if (skin.shape === 'frost' || skin.shape === 'ring' || skin.shape === 'star' || skin.shape === 'pulsar') {
+  if (skin.shape === 'frost' || skin.shape === 'ring' || skin.shape === 'pulsar') {
     c.save();
     c.globalCompositeOperation = 'lighter';
     c.strokeStyle = hex(skin.mid);
@@ -551,6 +630,10 @@ function geos() {
   return sharedGeos;
 }
 
+/** Базовый размер ядра «Сверхновой» и период её ударных волн (используется и Engine для частиц). */
+const STAR_CORE = 0.8;
+export const STAR_PERIOD = 2.6;
+
 export interface SparkRig {
   group: THREE.Group;
   coronaTex: THREE.Texture;
@@ -592,8 +675,8 @@ export function buildSparkRig(skin: Skin): SparkRig {
   let jetMat: THREE.MeshBasicMaterial | null = null;
   let voidOuter: THREE.Mesh | null = null;
   let voidInner: THREE.Mesh | null = null;
-  let starCrown: THREE.Group | null = null;
-  let starHalo: THREE.Mesh | null = null;
+  let starAnim: ((dt: number, time: number) => void) | null = null;
+  const ownGeos: THREE.BufferGeometry[] = [];
   let frostHalo: THREE.Mesh | null = null;
 
   if (skin.shape === 'frost') {
@@ -777,45 +860,106 @@ export function buildSparkRig(skin: Skin): SparkRig {
     ringPivotA.add(lensDisc);
     root.add(voidOuter, voidInner, ringPivotA);
   } else if (skin.shape === 'star') {
-    // Сверхновая: кристаллическая 6-лучевая звёздная корона + двойной радужный нимб
-    starCrown = new THREE.Group();
-    const spikeMatA = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.92,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const spikeMatB = new THREE.MeshBasicMaterial({
-      color: 0x6ef7d8,
-      transparent: true,
-      opacity: 0.78,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const haloMat = new THREE.MeshBasicMaterial({
-      map: bundle.discTex,
-      transparent: true,
-      opacity: 0.82,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    mats.push(spikeMatA, spikeMatB, haloMat);
+    // Сверхновая: компактный огранённый кристалл + тонкие иглы-лучи, гироскоп из трёх колец
+    // с разноцветными бусинами, двойной каркас и периодические ударные волны взрыва.
+    coreMesh.scale.setScalar(STAR_CORE);
+    veilMesh.scale.setScalar(STAR_CORE * 0.98);
 
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      const sp = new THREE.Mesh(g.starSpike, i % 2 === 0 ? spikeMatA : spikeMatB);
-      const len = i % 2 === 0 ? 2.5 : 1.85;
-      sp.scale.set(0.68, len, 0.68);
-      sp.position.set(Math.cos(a) * 0.46, Math.sin(a) * 0.46, 0);
-      sp.rotation.z = a - Math.PI / 2;
-      starCrown.add(sp);
+    const GOLD = 0xffd166;
+    const AQUA = 0x6ef7d8;
+    const LILAC = 0xd4b8ff;
+    const addMat = (color: number, opacity: number, extra: Partial<THREE.MeshBasicMaterialParameters> = {}) => {
+      const m = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        ...extra,
+      });
+      mats.push(m);
+      return m;
+    };
+    const own = <T extends THREE.BufferGeometry>(geo: T): T => {
+      ownGeos.push(geo);
+      return geo;
+    };
+    const starShape = (points: number, outer: number, inner: number, rot: number) => {
+      const sh = new THREE.Shape();
+      for (let i = 0; i < points * 2; i++) {
+        const rad = i % 2 === 0 ? outer : inner;
+        const a = (i * Math.PI) / points + rot + Math.PI / 2;
+        if (i === 0) sh.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
+        else sh.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+      }
+      sh.closePath();
+      return new THREE.ShapeGeometry(sh);
+    };
+
+    // Иглы: длинный крест, диагональный крест и тонкий «зубчатый» ободок
+    const needles = new THREE.Group();
+    const needleA = new THREE.Mesh(own(starShape(4, 0.74, 0.045, 0)), addMat(0xffffff, 0.92));
+    const needleB = new THREE.Mesh(own(starShape(4, 0.46, 0.04, Math.PI / 4)), addMat(AQUA, 0.78));
+    needles.add(needleA, needleB);
+    const crownRim = new THREE.Mesh(own(starShape(16, 0.43, 0.33, 0)), addMat(LILAC, 0.4));
+    crownRim.position.z = -0.01;
+
+    // Каркасы: золотой икосаэдр (детализированный) и бирюзовый внешний
+    const cageA = new THREE.Mesh(own(new THREE.IcosahedronGeometry(0.37, 1)), addMat(GOLD, 0.42, { wireframe: true }));
+    const cageB = new THREE.Mesh(own(new THREE.IcosahedronGeometry(0.47, 0)), addMat(AQUA, 0.5, { wireframe: true }));
+
+    // Гироскоп: три тонких кольца в разных плоскостях + бусины
+    const gyroDefs = [
+      { r: 0.52, color: GOLD, tiltX: 1.15, tiltY: 0.0, speed: 2.3 },
+      { r: 0.6, color: AQUA, tiltX: 1.15, tiltY: 2.1, speed: -1.8 },
+      { r: 0.68, color: LILAC, tiltX: 1.15, tiltY: 4.2, speed: 1.4 },
+    ];
+    const gyros: { tilt: THREE.Group; spin: THREE.Group; speed: number }[] = [];
+    for (const d of gyroDefs) {
+      const tilt = new THREE.Group();
+      tilt.rotation.set(d.tiltX, d.tiltY, 0);
+      const ring = new THREE.Mesh(own(new THREE.TorusGeometry(d.r, 0.0075, 6, 72)), addMat(d.color, 0.55));
+      const spin = new THREE.Group();
+      const bead = new THREE.Mesh(own(new THREE.SphereGeometry(0.036, 10, 8)), addMat(0xffffff, 0.98));
+      const beadGlow = new THREE.Mesh(own(new THREE.SphereGeometry(0.07, 10, 8)), addMat(d.color, 0.45));
+      bead.position.set(d.r, 0, 0);
+      beadGlow.position.set(d.r, 0, 0);
+      spin.add(bead, beadGlow);
+      tilt.add(ring, spin);
+      root.add(tilt);
+      gyros.push({ tilt, spin, speed: d.speed });
     }
-    starHalo = new THREE.Mesh(g.discPlane, haloMat);
-    starHalo.scale.setScalar(1.06);
-    starHalo.rotation.set(Math.PI / 2.5, -0.25, 0);
-    root.add(starCrown, starHalo);
+
+    // Ударные волны сверхновой (две, сдвинуты по фазе)
+    const shockGeo = own(new THREE.RingGeometry(0.93, 1, 72));
+    const shocks = [
+      new THREE.Mesh(shockGeo, addMat(GOLD, 0)),
+      new THREE.Mesh(shockGeo, addMat(AQUA, 0)),
+    ];
+
+    root.add(cageA, cageB, needles, crownRim, ...shocks);
+
+    starAnim = (dt: number, time: number) => {
+      needles.rotation.z += dt * 0.9;
+      needleA.scale.setScalar(1 + Math.sin(time * 5.2) * 0.07);
+      needleB.scale.setScalar(1 + Math.cos(time * 6.1) * 0.09);
+      crownRim.rotation.z -= dt * 0.55;
+      cageA.rotation.x += dt * 0.8;
+      cageA.rotation.y += dt * 1.3;
+      cageB.rotation.x -= dt * 1.1;
+      cageB.rotation.z += dt * 0.7;
+      for (let i = 0; i < gyros.length; i++) {
+        gyros[i].spin.rotation.z += dt * gyros[i].speed;
+        gyros[i].tilt.rotation.y += dt * (0.25 + i * 0.1);
+      }
+      for (let i = 0; i < shocks.length; i++) {
+        const t = (time / STAR_PERIOD + i * 0.5) % 1;
+        const e = 1 - (1 - t) * (1 - t);
+        shocks[i].scale.setScalar(0.34 + e * 0.95);
+        (shocks[i].material as THREE.MeshBasicMaterial).opacity = Math.pow(1 - t, 1.7) * (i === 0 ? 0.62 : 0.4);
+      }
+    };
   }
 
   return {
@@ -834,7 +978,7 @@ export function buildSparkRig(skin: Skin): SparkRig {
       veilMesh.rotation.z += dt * 0.55;
 
       const pulse = 1 + Math.sin(time * 4.2) * 0.035;
-      coreMesh.scale.setScalar((skin.shape === 'void' ? 0.88 : 1) * pulse);
+      coreMesh.scale.setScalar((skin.shape === 'void' ? 0.88 : skin.shape === 'star' ? STAR_CORE : 1) * pulse);
 
       if (frostHalo) {
         frostHalo.rotation.z += dt * 1.4;
@@ -867,14 +1011,11 @@ export function buildSparkRig(skin: Skin): SparkRig {
         const vp = 1 + Math.sin(time * 4.8) * 0.055;
         voidOuter.scale.setScalar(vp);
       }
-      if (starCrown && starHalo) {
-        starCrown.rotation.z += dt * 1.35;
-        starCrown.scale.setScalar(1 + Math.sin(time * 6.5) * 0.075);
-        starHalo.rotation.z -= dt * 1.8;
-      }
+      if (starAnim) starAnim(dt, time);
     },
     dispose() {
       for (const m of mats) m.dispose();
+      for (const gm of ownGeos) gm.dispose();
     },
   };
 }
@@ -941,36 +1082,54 @@ export function getSkinPreviewUrl(skinId: string): string {
     c.fill();
     c.restore();
   } else if (skin.shape === 'star') {
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 - Math.PI / 2;
-      const len = i % 2 === 0 ? R * 1.62 : R * 1.32;
+    // Сверхновая: тонкие иглы (крест + диагонали) и зубчатый ободок — компактнее прежних лучей
+    const needle = (ang: number, len: number, wid: number, col: string, alpha: number) => {
       c.save();
-      c.rotate(a);
-      c.fillStyle = i % 2 === 0 ? '#ffffff' : '#6ef7d8';
-      c.globalAlpha = 0.88;
+      c.rotate(ang);
+      c.globalAlpha = alpha;
+      c.fillStyle = col;
       c.beginPath();
-      c.moveTo(0, -5.5);
+      c.moveTo(-len, 0);
+      c.lineTo(0, -wid);
       c.lineTo(len, 0);
-      c.lineTo(0, 5.5);
+      c.lineTo(0, wid);
       c.closePath();
       c.fill();
       c.restore();
+    };
+    for (let i = 0; i < 2; i++) needle((i * Math.PI) / 2, R * 1.5, 2.6, '#ffffff', 0.92);
+    for (let i = 0; i < 2; i++) needle(Math.PI / 4 + (i * Math.PI) / 2, R * 0.98, 2, '#6ef7d8', 0.8);
+    c.strokeStyle = '#d4b8ff';
+    c.globalAlpha = 0.55;
+    c.lineWidth = 1.2;
+    c.beginPath();
+    for (let i = 0; i < 32; i++) {
+      const a = (i / 32) * Math.PI * 2;
+      const r0 = R * (i % 2 === 0 ? 1.1 : 1.02);
+      const r1 = R * (i % 2 === 0 ? 1.24 : 1.12);
+      c.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
+      c.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
     }
+    c.stroke();
+    c.globalAlpha = 1;
   }
   c.restore();
 
   // Задняя дуга орбиты (для ring / pulsar / void / star)
   const hasOrbit = skin.shape === 'ring' || skin.shape === 'pulsar' || skin.shape === 'void' || skin.shape === 'star';
-  const orbitTilt = skin.shape === 'pulsar' ? -0.48 : -0.32;
+  const orbitTilt = skin.shape === 'pulsar' ? -0.48 : skin.shape === 'star' ? -0.55 : -0.32;
+  const orbRX = skin.shape === 'star' ? R * 1.3 : R * 1.56;
+  const orbRY = skin.shape === 'star' ? R * 0.4 : R * 0.48;
+  const orbLW = skin.shape === 'ring' ? 5.5 : skin.shape === 'star' ? 2 : 4;
   if (hasOrbit) {
     c.save();
     c.translate(cx, cy);
     c.rotate(orbitTilt);
     c.strokeStyle = hex(skin.mid);
-    c.lineWidth = skin.shape === 'ring' ? 5.5 : 4;
+    c.lineWidth = orbLW;
     c.globalAlpha = 0.68;
     c.beginPath();
-    c.ellipse(0, 0, R * 1.56, R * 0.48, 0, Math.PI, Math.PI * 2);
+    c.ellipse(0, 0, orbRX, orbRY, 0, Math.PI, Math.PI * 2);
     c.stroke();
     c.restore();
   }
@@ -991,7 +1150,7 @@ export function getSkinPreviewUrl(skinId: string): string {
   const spImg = spCtx.createImageData(sphereBox, sphereBox);
   const sd = spImg.data;
   const [rr, rg, rb] = unpackRgb(skin.mid);
-  const sphereR = skin.shape === 'void' ? R * 0.86 : R;
+  const sphereR = skin.shape === 'void' ? R * 0.86 : skin.shape === 'star' ? R * 0.74 : R;
 
   for (let py = 0; py < sphereBox; py++) {
     for (let px = 0; px < sphereBox; px++) {
@@ -1038,10 +1197,10 @@ export function getSkinPreviewUrl(skinId: string): string {
     c.strokeStyle = hex(skin.core);
     c.shadowColor = hex(skin.glow);
     c.shadowBlur = 10;
-    c.lineWidth = skin.shape === 'ring' ? 5.5 : 4;
+    c.lineWidth = orbLW;
     c.globalAlpha = 0.92;
     c.beginPath();
-    c.ellipse(0, 0, R * 1.56, R * 0.48, 0, 0, Math.PI);
+    c.ellipse(0, 0, orbRX, orbRY, 0, 0, Math.PI);
     c.stroke();
 
     if (skin.shape === 'ring') {
@@ -1050,6 +1209,44 @@ export function getSkinPreviewUrl(skinId: string): string {
       c.arc(R * 1.28, R * 0.26, 4.8, 0, Math.PI * 2);
       c.fill();
     }
+    if (skin.shape === 'star') {
+      // бусины гироскопа
+      const beads: [number, string][] = [
+        [0.28, '#ffd166'],
+        [0.74, '#6ef7d8'],
+      ];
+      for (const [t, col] of beads) {
+        const a = Math.PI * t;
+        const bx = Math.cos(a) * orbRX;
+        const by = Math.sin(a) * orbRY;
+        c.globalAlpha = 1;
+        c.shadowColor = col;
+        c.shadowBlur = 8;
+        c.fillStyle = '#ffffff';
+        c.beginPath();
+        c.arc(bx, by, 2.8, 0, Math.PI * 2);
+        c.fill();
+        c.globalAlpha = 0.5;
+        c.fillStyle = col;
+        c.beginPath();
+        c.arc(bx, by, 5, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+    c.restore();
+  }
+
+  if (skin.shape === 'star') {
+    // второе тонкое кольцо в другой плоскости
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(0.62);
+    c.strokeStyle = '#d4b8ff';
+    c.globalAlpha = 0.6;
+    c.lineWidth = 1.4;
+    c.beginPath();
+    c.ellipse(0, 0, R * 1.2, R * 0.34, 0, 0, Math.PI);
+    c.stroke();
     c.restore();
   }
 

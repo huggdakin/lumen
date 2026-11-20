@@ -10,7 +10,7 @@ import { Inspector, type InspectKind } from './Inspector';
 type Tab = 'sparks' | 'skins' | 'themes' | 'buffs' | 'ach';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'sparks', label: 'Искры', icon: <Star size={15} /> },
+  { id: 'sparks', label: 'Магазин', icon: <Star size={15} /> },
   { id: 'skins', label: 'Скины', icon: <Sparkles size={15} /> },
   { id: 'themes', label: 'Тоннели', icon: <ShoppingBag size={15} /> },
   { id: 'buffs', label: 'Баффы', icon: <Zap size={15} /> },
@@ -62,7 +62,7 @@ function ThemePreview({ t }: { t: (typeof THEMES)[number] }) {
   );
 }
 
-/** Превью-карточка с бейджем «3D»: клик открывает осмотр. */
+/** Превью-карточка: клик по иконке открывает 3D-осмотр. */
 function View3DFrame({ onOpen, children, label }: { onOpen: () => void; children: React.ReactNode; label: string }) {
   return (
     <button
@@ -75,22 +75,6 @@ function View3DFrame({ onOpen, children, label }: { onOpen: () => void; children
       <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-ink-950/0 opacity-0 transition group-hover:bg-ink-950/45 group-hover:opacity-100">
         <Box size={22} className="text-white drop-shadow" />
       </span>
-      <span className="pointer-events-none absolute bottom-0.5 right-0.5 flex items-center gap-0.5 rounded-sm bg-ink-950/85 px-1 py-px font-display text-[8px] font-black tracking-[0.1em] text-sonar-300">
-        <Box size={8} />3D
-      </span>
-    </button>
-  );
-}
-
-function Open3D({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="pointer-events-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap border border-sonar-400/40 bg-sonar-500/10 px-2.5 py-2 font-display text-[11px] font-bold uppercase tracking-[0.08em] text-sonar-200 transition hover:border-sonar-300/70 hover:bg-sonar-500/20"
-      style={cut(8)}
-    >
-      <Box size={13} />
-      3D
     </button>
   );
 }
@@ -294,7 +278,6 @@ export function Shop({
                               {sk.price} ✦
                             </Btn>
                           )}
-                          <Open3D onClick={() => open3D('skin', sk.id)} />
                         </div>
                       </div>
                     </div>
@@ -302,7 +285,7 @@ export function Shop({
                 })}
                 <div className="text-[11px] leading-relaxed text-white/60 sm:col-span-2">
                   3 текстурированных ядра доступны бесплатно сразу. 5 платных — авторские 3D-формы главной искры со своими
-                  многослойными текстурами, короной свечения и бонусами на забег. Нажмите «3D-осмотр», чтобы покрутить любой скин.
+                  многослойными текстурами, короной свечения и бонусами на забег. Нажмите на иконку скина, чтобы рассмотреть его в 3D.
                 </div>
               </div>
             )}
@@ -359,7 +342,6 @@ export function Shop({
                               {t.price} ✦
                             </Btn>
                           )}
-                          <Open3D onClick={() => open3D('theme', t.id)} />
                         </div>
                       </div>
                     </div>
@@ -367,7 +349,7 @@ export function Shop({
                 })}
                 <div className="text-[11px] leading-relaxed text-white/65 sm:col-span-2">
                   3 тоннеля открыты бесплатно. 5 платных — отдельная архитектура со своим материалом, светом и
-                  ритмом рёбер; свечение и частицы приглушены, чтобы препятствия всегда читались. Нажмите «3D-осмотр», чтобы пройтись по тоннелю изнутри или рассмотреть его в разрезе.
+                  ритмом рёбер; свечение и частицы приглушены, чтобы препятствия всегда читались. Нажмите на превью тоннеля, чтобы пройтись по нему изнутри или рассмотреть в разрезе.
                 </div>
               </div>
             )}

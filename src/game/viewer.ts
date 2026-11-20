@@ -103,13 +103,13 @@ export class SkinViewer3D {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color(0x04030c);
 
-    this.camera.position.set(0, 0.55, 6.0);
+    this.camera.position.set(0, 0.7, 8.8);
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enablePan = false;
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.07;
-    this.controls.minDistance = 2.6;
-    this.controls.maxDistance = 10;
+    this.controls.minDistance = 4.2;
+    this.controls.maxDistance = 14;
     this.controls.rotateSpeed = 0.8;
     this.controls.autoRotate = true;
     this.controls.autoRotateSpeed = 1.6;
@@ -213,7 +213,7 @@ export class SkinViewer3D {
   }
 
   resetView() {
-    this.camera.position.set(0, 0.55, 6.0);
+    this.camera.position.set(0, 0.7, 8.8);
     this.controls.target.set(0, 0.05, 0);
     this.controls.update();
   }
@@ -697,6 +697,9 @@ export class TunnelViewer3D {
       this.controls.minPolarAngle = 0.25;
       this.controls.maxPolarAngle = Math.PI - 0.25;
       this.controls.rotateSpeed = -0.45;
+      // Только передняя полусфера: 180° по горизонтали (±90° от направления бега), назад не повернуться
+      this.controls.minAzimuthAngle = -Math.PI / 2;
+      this.controls.maxAzimuthAngle = Math.PI / 2;
       const camPos = new THREE.Vector3(0, 0.8, 7);
       const dir = new THREE.Vector3(0, -1.7, -27).normalize();
       this.controls.target.copy(camPos).addScaledVector(dir, 0.01);
@@ -712,6 +715,8 @@ export class TunnelViewer3D {
       this.controls.minPolarAngle = 0.05;
       this.controls.maxPolarAngle = Math.PI - 0.05;
       this.controls.rotateSpeed = 0.8;
+      this.controls.minAzimuthAngle = -Infinity;
+      this.controls.maxAzimuthAngle = Infinity;
       this.controls.autoRotate = this.autoRotate;
       this.controls.autoRotateSpeed = 1.4;
       this.controls.target.set(0, 0, 0);

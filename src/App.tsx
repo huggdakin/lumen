@@ -295,7 +295,12 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
       const sc = screenRef.current;
-      if (e.code === 'Escape' || e.code === 'KeyP') {
+      if (e.code === 'Space') {
+        // пробел не должен «нажимать» сфокусированные кнопки / скроллить страницу
+        e.preventDefault();
+        (document.activeElement as HTMLElement | null)?.blur?.();
+      }
+      if (e.code === 'Escape' || e.code === 'KeyP' || (e.code === 'Space' && (sc === 'playing' || sc === 'paused') && overlayRef.current === 'none')) {
         if (overlayRef.current !== 'none') {
           setOverlay('none');
           return;
@@ -313,7 +318,9 @@ export default function App() {
       }
       if (overlayRef.current !== 'none') return;
       if (sc === 'menu' && (e.code === 'Space' || e.code === 'Enter')) void startRef.current?.();
-      if ((sc === 'gameover' || sc === 'paused') && (e.code === 'KeyR' || e.code === 'Enter' || e.code === 'Space')) {
+      if ((sc === 'paused' && (e.code === 'KeyR' || e.code === 'Enter')) ||
+        (sc === 'gameover' && (e.code === 'KeyR' || e.code === 'Enter' || e.code === 'Space'))
+      ) {
         void startRef.current?.();
       }
     };
@@ -599,7 +606,7 @@ export default function App() {
       preGameOverSaveRef.current = null;
       setCanRevive(false);
     }
-    if (tab) setShopTab(tab as ShopTab);
+    setShopTab((tab as ShopTab) ?? 'sparks');
     setOverlay((o) => (o === 'shop' && !tab ? 'none' : 'shop'));
   };
 
@@ -623,6 +630,16 @@ export default function App() {
           </>
         )}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_52%,rgba(4,3,12,0.82)_100%)]" />
+        {theme.id === 'zero' && (screen === 'playing' || screen === 'paused') && (
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,0.55) 78%, rgba(0,0,0,0.9) 100%), repeating-linear-gradient(0deg, rgba(255,255,255,0.028) 0px, rgba(255,255,255,0.028) 1px, transparent 1px, transparent 4px)',
+              mixBlendMode: 'normal',
+            }}
+          />
+        )}
         {screen === 'menu' && (
           <div
             className="absolute -bottom-28 left-1/4 h-72 w-[38rem] -translate-x-1/2 rounded-full blur-[95px] transition-colors duration-700"
