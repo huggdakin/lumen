@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Unbounded", "Manrope", system-ui, sans-serif;
+  --font-body: "Manrope", "Segoe UI", sans-serif;
+
+  --color-ink-950: #04030c;
+  --color-ink-900: #080718;
+  --color-ink-800: #0d0b24;
+  --color-ink-700: #161238;
+  --color-ink-600: #221b52;
+
+  --color-ember-200: #ffe9b8;
+  --color-ember-300: #ffd166;
+  --color-ember-400: #ffb03a;
+  --color-ember-500: #f2820f;
+
+  --color-sonar-200: #b6fff0;
+  --color-sonar-300: #6ef7d8;
+  --color-sonar-400: #23e0b6;
+  --color-sonar-500: #0fb494;
+
+  --color-hot-300: #ff7aa8;
+  --color-hot-400: #ff2f74;
+  --color-hot-500: #d8125a;
+
+  --color-myst-300: #c3aaff;
+  --color-myst-400: #8b62ff;
+  --color-myst-500: #6a3cf0;
+
+  --animate-marquee: marquee 26s linear infinite;
+  --animate-rise: rise 0.45s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+  --animate-pop: pop 0.28s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+  --animate-breathe: breathe 3.4s ease-in-out infinite;
+  --animate-sheen: sheen 2.6s ease-in-out infinite;
+  --animate-spin-slow: spin 26s linear infinite;
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.86); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+@keyframes sheen {
+  0% { transform: translateX(-120%) skewX(-18deg); }
+  60%, 100% { transform: translateX(320%) skewX(-18deg); }
+}
+@keyframes beams {
+  to { transform: rotate(360deg); }
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-ink-950);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  font-family: var(--font-body);
+  color: #f4f2ff;
+}
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+/* Чужие плашки-холдеры хостинга не должны висеть поверх игры */
+[class*='arena' i],
+[id*='arena' i],
+[class*='built-with' i],
+[class*='watermark' i],
+[class*='made-with' i] {
+  display: none !important;
+}
+
+/* --- Слои живой подложки --- */
+.layer-grain {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.5) 0.5px, transparent 0.6px);
+  background-size: 3px 3px;
+  opacity: 0.05;
+}
+.layer-beams {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 176, 58, 0.16) 18deg,
+    transparent 40deg,
+    transparent 150deg,
+    rgba(35, 224, 182, 0.14) 172deg,
+    transparent 200deg,
+    transparent 300deg,
+    rgba(139, 98, 255, 0.13) 322deg,
+    transparent 360deg
+  );
+  animation: beams 44s linear infinite;
+}
+.layer-hatch {
+  background-image: repeating-linear-gradient(
+    118deg,
+    rgba(255, 255, 255, 0.045) 0 1px,
+    transparent 1px 13px
+  );
+}
+
+/* --- Скролл внутри панелей --- */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 99px;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+.stroke-title {
+  color: #ffe9b8;
+  -webkit-text-stroke: 0;
+  text-shadow:
+    0 2px 0 rgba(4, 3, 12, 0.95),
+    0 0 26px rgba(255, 176, 58, 0.55),
+    0 0 60px rgba(255, 176, 58, 0.25);
+}
+/* Тени текста поверх 3D-сцены: наследуются потомками без перебора * всех DOM-узлов */
+.ui-shadow {
+  text-shadow: 0 1px 2px rgba(4, 3, 12, 0.95), 0 0 12px rgba(4, 3, 12, 0.7);
+}
+.ui-shadow input,
+.ui-shadow textarea {
+  text-shadow: none;
+}
+.panel-solid {
+  background-color: rgba(8, 7, 24, 0.94);
+  backdrop-filter: blur(10px);
+}
