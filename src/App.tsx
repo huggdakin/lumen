@@ -31,7 +31,7 @@ import {
   type SaveData,
 } from './game/state';
 import { AD_COOLDOWN, AD_SPARKS, BUFFS, fxFromLoadout, productById, themeById, type Product } from './game/economy';
-import { setUiSound } from './components/ui';
+import { installHoverSound, setUiSound } from './components/ui';
 import {
   gameReady,
   gameplayStart,
@@ -223,10 +223,13 @@ export default function App() {
       document.removeEventListener('pointerdown', unlock);
       document.removeEventListener('touchstart', unlock);
       document.removeEventListener('touchend', unlock);
+      document.removeEventListener('keydown', unlock);
     };
     document.addEventListener('pointerdown', unlock);
     document.addEventListener('touchstart', unlock);
     document.addEventListener('touchend', unlock);
+    document.addEventListener('keydown', unlock);
+    const removeHover = installHoverSound();
 
     const boot = async () => {
       const local = loadSave();
@@ -332,6 +335,8 @@ export default function App() {
       document.removeEventListener('pointerdown', unlock);
       document.removeEventListener('touchstart', unlock);
       document.removeEventListener('touchend', unlock);
+      document.removeEventListener('keydown', unlock);
+      removeHover();
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('keydown', onKey);
       setUiSound(null);

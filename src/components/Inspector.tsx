@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Compass, Hand, Lock, Move3d, Orbit, RotateCcw, Sparkles, Star, Wind } from 'lucide-react';
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Hand, Lock, Move3d, Orbit, RotateCcw, Sparkles, Star, Wind } from 'lucide-react';
 import { THEMES, type Theme } from '../game/economy';
 import { getThemePreviewUrl } from '../game/Engine';
 import { getSkinPreviewUrl } from '../game/sparkSkins';
@@ -15,7 +15,7 @@ const THEME_FEATURES: Record<string, string[]> = {
   polar: ['Сине-зелёный градиент глубины', 'Мягкое сияние и частицы в толще воды', 'Просторный ритм: рёбра встречаются редко'],
   current: ['Стеклянно-металлические рёбра', 'Бирюзовое свечение, 8 направляющих лучей', 'Плотные частицы подводного течения'],
   prism: ['Шестигранные рёбра', 'Кромка переливается: розовый ⇄ фиолетовый', 'Гранёные панели; препятствия — ледяные'],
-  corona: ['Золотые сегменты на тёмной бронзе', 'Яркое ядро с лучами в конце тоннеля', 'Препятствия холодные — не сливаются со стенами'],
+  magma: ['Раскалённый базальт с жилами лавы', 'Тлеющие красно-оранжевые рёбра, переливающиеся от алого к янтарному', 'Яркое ядро с лучами и летящие искры-угли; препятствия холодные'],
   crystal: ['Восьмигранные рёбра', 'Кристаллические панели с ледяными бликами', 'Контрастные тёмные промежутки между гранями'],
   zero: [
     'Матовые графитовые плиты с тонкой серой фаской',
@@ -101,7 +101,7 @@ export function Inspector({
   const viewerRef = useRef<SkinViewer3D | TunnelViewer3D | null>(null);
   const [failed, setFailed] = useState(false);
   const [touched, setTouched] = useState(false);
-  const [mode, setMode] = useState<TunnelMode>('inside');
+  const mode: TunnelMode = 'inside';
   const [flight, setFlight] = useState(true);
   const [spin, setSpin] = useState(true);
 
@@ -249,16 +249,6 @@ export function Inspector({
 
           {/* панель режимов */}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-center gap-1.5 p-2.5 sm:p-3.5">
-            {kind === 'theme' && (
-              <div className="pointer-events-auto flex gap-1">
-                <Pill active={mode === 'inside'} onClick={() => setMode('inside')} title="Вид из кабины — как в игре">
-                  <Compass size={13} /> Изнутри
-                </Pill>
-                <Pill active={mode === 'outside'} onClick={() => setMode('outside')} title="Разрез тоннеля снаружи">
-                  <Orbit size={13} /> Снаружи
-                </Pill>
-              </div>
-            )}
             {kind === 'theme' && mode === 'inside' ? (
               <Pill active={flight} onClick={() => setFlight((f) => !f)}>
                 <Wind size={13} /> Полёт {flight ? 'вкл' : 'выкл'}
@@ -334,13 +324,6 @@ export function Inspector({
             ))}
           </ul>
         </div>
-
-        {kind === 'theme' && (
-          <div className="border border-white/12 bg-white/[0.03] p-2.5 text-[11px] leading-relaxed text-white/72" style={cut(8)}>
-            <b className="text-white/90">Изнутри</b> — вид из кабины, как на трассе: тяните, чтобы оглядеться. <b className="text-white/90">Снаружи</b> — разрез
-            тоннеля: вращайте и приближайте, чтобы рассмотреть рёбра и обшивку.
-          </div>
-        )}
 
         <div className="mt-auto flex flex-col gap-2 pt-1">
           {owned ? (

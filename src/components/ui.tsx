@@ -9,6 +9,34 @@ export function setUiSound(s: Sound | null) {
   uiSound = s;
 }
 
+/**
+ * Глобальный звук наведения: любая потенциально кликабельная кнопка/ссылка во всей игре
+ * (магазин, меню, пауза, 3D-осмотр, плашки) мягко «отзывается» при наведении.
+ */
+export function installHoverSound(): () => void {
+  let last: Element | null = null;
+  const sel = 'button, a[href], [role="button"], summary, label[for], input[type="button"], input[type="submit"]';
+  const onOver = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') return;
+    const t = e.target as Element | null;
+    const el = t?.closest?.(sel) ?? null;
+    if (el === last) return;
+    last = el;
+    if (!el) return;
+    if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') return;
+    uiSound?.hover();
+  };
+  const onLeave = () => {
+    last = null;
+  };
+  document.addEventListener('pointerover', onOver, true);
+  document.addEventListener('pointerleave', onLeave, true);
+  return () => {
+    document.removeEventListener('pointerover', onOver, true);
+    document.removeEventListener('pointerleave', onLeave, true);
+  };
+}
+
 /** Короткая пробная мелодия — кнопка «Тест звука» в правилах. */
 export function uiTestSound() {
   uiSound?.resume();
@@ -58,10 +86,7 @@ export function Btn({
         uiSound?.click();
         onClick();
       }}
-      onMouseEnter={() => {
-        setHover(true);
-        if (!disabled) uiSound?.hover();
-      }}
+      onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       disabled={disabled}
       style={{ ...cut(12) }}

@@ -157,3 +157,29 @@ canvas {
   background-color: rgba(8, 7, 24, 0.94);
   backdrop-filter: blur(10px);
 }
+
+/* --- Магазин: выделенные выгодные предложения --- */
+@keyframes borderflow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+@keyframes cubepop {
+  from { opacity: 0; transform: scale(0.6) rotate(-12deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}
+.offer-flow {
+  background-size: 300% 100%;
+  animation: borderflow 5s linear infinite;
+}
+.offer-sheen::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  width: 28%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  animation: sheen 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.cube-hover {
+  animation: cubepop 0.22s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}

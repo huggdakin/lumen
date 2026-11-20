@@ -1,38 +1,57 @@
-// Звуковой движок LUMEN: тёплый бесшовный космический пэд и мягкие музыкальные SFX на WebAudio.
-// Все частоты фонового пэда строго кратны 1/DUR Гц — математически идеальная петля без обрывов и щелчков.
+// Звуковой движок LUMEN: генеративная музыка (меню — глубокий спокойный пэд, забег — мягкая
+// мелодия с арпеджио) и тёплые SFX на WebAudio. Всё синтезируется на лету, без файлов.
 
-const PAD_SCALE = [110.0, 164.81, 220.0, 246.94, 261.63, 329.63, 392.0]; // Am9 / Cmaj7
-const PICKUP_SCALE = [392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0, 987.77, 1046.5, 1174.66, 1318.51];
+// Мягкий «бархатный» сбор светлячков: пентатоника Am в низко-средней октаве (без звона)
+const PICKUP_SCALE = [196.0, 220.0, 261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99];
 
-function createSeamlessPadBuffer(ctx: AudioContext): AudioBuffer {
-  const sr = 24000;
-  const dur = 16; // 16 секунд — плавное дыхание без ощущения короткой зацикленности
-  const len = sr * dur;
+const NOTE_IDX: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+/** 'F#4' → частота, Гц. */
+function nf(name: string): number {
+  const m = /^([A-G])(#|b)?(\d)$/.exec(name);
+  if (!m) return 440;
+  const semi = NOTE_IDX[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+  const midi = 12 * (Number(m[3]) + 1) + semi;
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+// ---------- Меню: Dm9 – Bbmaj7 – Fmaj9 – C(add9), по 9.6 с ----------
+const MENU_CHORD_DUR = 9.6;
+const MENU_CHORDS = [
+  { bass: 'D2', pad: ['D3', 'A3', 'C4', 'E4', 'F4'], spark: ['A4', 'D5', 'E5', 'F5', 'A5'] },
+  { bass: 'Bb1', pad: ['Bb2', 'F3', 'A3', 'D4', 'F4'], spark: ['F4', 'A4', 'D5', 'F5', 'C5'] },
+  { bass: 'F2', pad: ['F3', 'A3', 'C4', 'E4', 'G4'], spark: ['C5', 'E5', 'G5', 'A4', 'A5'] },
+  { bass: 'C2', pad: ['C3', 'G3', 'C4', 'D4', 'E4'], spark: ['G4', 'D5', 'E5', 'G5', 'C5'] },
+].map((c) => ({ bass: nf(c.bass), pad: c.pad.map(nf), spark: c.spark.map(nf) }));
+
+// ---------- Забег: Am – Fmaj7 – C – G6/9, 96 bpm, восьмые ----------
+const GAME_STEP = 60 / 96 / 2;
+const GAME_CHORDS = [
+  { bass: 'A1', pad: ['A2', 'E3', 'A3', 'C4'], arp: ['A3', 'C4', 'E4', 'G4', 'B4'], mel: ['E5', null, 'C5', null, 'D5', 'E5', null, 'C5'] },
+  { bass: 'F2', pad: ['F2', 'C3', 'A3', 'E4'], arp: ['F3', 'A3', 'C4', 'E4', 'G4'], mel: ['A4', null, 'C5', null, 'F5', 'E5', null, 'C5'] },
+  { bass: 'C2', pad: ['C3', 'G3', 'E4', 'B3'], arp: ['C4', 'E4', 'G4', 'B4', 'D5'], mel: ['G4', null, 'C5', null, 'E5', 'D5', null, 'C5'] },
+  { bass: 'G1', pad: ['G2', 'D3', 'B3', 'E4'], arp: ['G3', 'B3', 'D4', 'E4', 'A4'], mel: ['D5', null, 'B4', null, 'D5', 'E5', null, 'A4'] },
+].map((c) => ({
+  bass: nf(c.bass),
+  pad: c.pad.map(nf),
+  arp: c.arp.map(nf),
+  mel: c.mel.map((x) => (x ? nf(x) : null)),
+}));
+const ARP_PATTERN = [0, 1, 2, 3, 2, 1, 2, 4];
+
+/** Синтетическая импульсная характеристика «большого зала»: затухающий шум, смягчённый фильтром. */
+function createReverbIR(ctx: AudioContext, seconds = 3.4): AudioBuffer {
+  const sr = ctx.sampleRate;
+  const len = Math.floor(sr * seconds);
   const buf = ctx.createBuffer(2, len, sr);
-  const left = buf.getChannelData(0);
-  const right = buf.getChannelData(1);
-
-  // Округляем каждую частоту до целого числа периодов на длине dur: фаза в конце === фазе в начале
-  const snap = (f: number) => Math.round(f * dur) / dur;
-  const freqs = PAD_SCALE.map(snap);
-  const amps = [0.24, 0.2, 0.18, 0.09, 0.12, 0.09, 0.06];
-  const lfoRates = [1 / dur, 2 / dur, 1 / dur, 3 / dur, 2 / dur, 1 / dur, 2 / dur];
-
-  const twoPi = Math.PI * 2;
-  for (let i = 0; i < len; i++) {
-    const t = i / sr;
-    let sL = 0;
-    let sR = 0;
-    for (let k = 0; k < freqs.length; k++) {
-      const f = freqs[k];
-      const lfoL = 0.72 + 0.28 * Math.sin(twoPi * lfoRates[k] * t + k * 1.1);
-      const lfoR = 0.72 + 0.28 * Math.sin(twoPi * lfoRates[k] * t + k * 1.1 + 0.9);
-      const ph = twoPi * f * t;
-      sL += amps[k] * lfoL * Math.sin(ph + k * 0.4);
-      sR += amps[k] * lfoR * Math.sin(ph + k * 0.4 + (k % 2 === 0 ? 0.18 : -0.18));
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    let lp = 0;
+    for (let i = 0; i < len; i++) {
+      const t = i / len;
+      const env = Math.pow(1 - t, 2.6);
+      lp += ((Math.random() * 2 - 1) - lp) * 0.32; // убираем «шипение»
+      d[i] = lp * env * 0.9;
     }
-    left[i] = sL * 0.48;
-    right[i] = sR * 0.48;
   }
   return buf;
 }
@@ -43,10 +62,19 @@ export class Sound {
   private sfx: GainNode | null = null;
   private sfxFilter: BiquadFilterNode | null = null;
 
-  private padBuffer: AudioBuffer | null = null;
-  private padSource: AudioBufferSourceNode | null = null;
-  private padFilter: BiquadFilterNode | null = null;
-  private padGain: GainNode | null = null;
+  // музыкальная шина: меню / забег — отдельные ветки с кроссфейдом, общий «зал» (реверб)
+  private musicBus: GainNode | null = null;
+  private menuBus: GainNode | null = null;
+  private gameBus: GainNode | null = null;
+  private padIn: GainNode | null = null; // пэды забега
+  private pluckFilter: BiquadFilterNode | null = null;
+  private pluckIn: GainNode | null = null;
+  private musicMode: 'menu' | 'game' = 'menu';
+  private musicTimer: number | null = null;
+  private musicT0 = 0;
+  private chordN = 0; // меню: сколько аккордов уже запланировано
+  private stepN = 0; // забег: сколько шагов запланировано
+  private sparkN = 0; // меню: сколько искорок запланировано
 
   private musicVol = 0.08;
   private _muted = false;
@@ -93,17 +121,19 @@ export class Sound {
       const ch = nb.getChannelData(0);
       for (let i = 0; i < nLen; i++) ch[i] = Math.random() * 2 - 1;
       this.noiseBuf = nb;
+
+      this.buildMusicGraph(ctx);
     } catch {
       this.ctx = null;
     }
   }
 
-  private targetPadGain(): number {
-    if (this._muted || !this.droneActive || this.musicVol <= 0.001) return 0;
-    return Math.min(0.32, this.musicVol * 2.1);
+  private musicLevel(): number {
+    if (this._muted || this.musicVol <= 0.001) return 0;
+    return Math.min(0.55, this.musicVol * 3.2);
   }
 
-  /** Вызывать из пользовательского жеста — разблокирует WebAudio на мобильных, НЕ включая дрон вне забега. */
+  /** Вызывать из пользовательского жеста — разблокирует WebAudio на мобильных и запускает музыку текущего режима. */
   resume() {
     this.ensure();
     const ctx = this.ctx;
@@ -123,9 +153,7 @@ export class Sound {
         /* ignore */
       }
     }
-    if (this.droneActive && !this.padSource) {
-      this.ensurePadRunning();
-    }
+    this.startMusicLoop();
   }
 
   setMuted(m: boolean) {
@@ -134,18 +162,19 @@ export class Sound {
     const t = this.ctx.currentTime;
     this.master.gain.cancelScheduledValues(t);
     this.master.gain.setTargetAtTime(m ? 0 : 0.72, t, 0.04);
-    if (this.padGain) {
-      this.padGain.gain.cancelScheduledValues(t);
-      this.padGain.gain.setTargetAtTime(this.targetPadGain(), t, 0.12);
-    }
+    this.applyMusicLevel(0.12);
   }
 
   setMusicVolume(v: number) {
     this.musicVol = Math.max(0, Math.min(0.4, v));
-    if (!this.ctx || !this.padGain) return;
+    this.applyMusicLevel(0.18);
+  }
+
+  private applyMusicLevel(tc: number) {
+    if (!this.ctx || !this.musicBus) return;
     const t = this.ctx.currentTime;
-    this.padGain.gain.cancelScheduledValues(t);
-    this.padGain.gain.setTargetAtTime(this.targetPadGain(), t, 0.18);
+    this.musicBus.gain.cancelScheduledValues(t);
+    this.musicBus.gain.setTargetAtTime(this.musicLevel(), t, tc);
   }
 
   // ---------------- Мягкий синтез SFX без щелчков ----------------
@@ -156,7 +185,7 @@ export class Sound {
     vol: number,
     opts?: { type?: OscillatorType; slideTo?: number; delay?: number; shimmer?: number; attack?: number }
   ) {
-    if (!this.ctx || !this.sfx || this._muted) return;
+    if (!this.ctx || !this.sfx || this._muted || this.ctx.state !== 'running') return;
     const ctx = this.ctx;
     const t = ctx.currentTime + (opts?.delay ?? 0);
     const attack = opts?.attack ?? 0.012;
@@ -233,14 +262,50 @@ export class Sound {
     src.stop(t + dur + 0.03);
   }
 
+  /** Тёплая нота без металлического звона: мягкое «тело» + короткий басовый толчок. */
+  private soft(
+    freq: number,
+    dur: number,
+    vol: number,
+    opts?: { from?: number; cutoff?: number; type?: OscillatorType; delay?: number; attack?: number }
+  ) {
+    if (!this.ctx || !this.sfx || this._muted || this.ctx.state !== 'running') return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime + (opts?.delay ?? 0);
+    const attack = opts?.attack ?? 0.008;
+    const osc = ctx.createOscillator();
+    osc.type = opts?.type ?? 'sine';
+    osc.frequency.setValueAtTime(Math.max(24, freq * (opts?.from ?? 1)), t);
+    if (opts?.from) osc.frequency.exponentialRampToValueAtTime(Math.max(24, freq), t + Math.min(0.07, dur * 0.4));
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = opts?.cutoff ?? 1400;
+    lp.Q.value = 0.4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(Math.max(0.0002, vol), t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(lp);
+    lp.connect(g);
+    g.connect(this.sfx);
+    osc.onended = () => {
+      g.disconnect();
+      lp.disconnect();
+    };
+    osc.start(t);
+    osc.stop(t + dur + 0.04);
+  }
+
   pickup(combo: number, max = false) {
     this.ensure();
     const idx = Math.max(0, Math.min(PICKUP_SCALE.length - 1, combo - 1));
     const note = PICKUP_SCALE[idx];
-    this.bell(note, 0.22, 0.16, { shimmer: 0.24, attack: 0.008 });
-    if (max) {
-      this.bell(note * 1.25, 0.28, 0.08, { delay: 0.045, attack: 0.01 });
-    }
+    // тело ноты — круглое, без «звона»
+    this.soft(note, 0.24, 0.2, { from: 1.05, cutoff: 1300 });
+    this.soft(note * 2, 0.12, 0.035, { type: 'triangle', cutoff: 1500 });
+    // небольшой бас под нотой
+    this.soft(98, 0.2, 0.17, { from: 1.5, cutoff: 420, attack: 0.006 });
+    if (max) this.soft(note * 1.5, 0.3, 0.08, { delay: 0.05, cutoff: 1300, attack: 0.012 });
   }
 
   nearMiss() {
@@ -294,7 +359,8 @@ export class Sound {
 
   hover() {
     this.ensure();
-    this.bell(987.77, 0.045, 0.022, { attack: 0.005 });
+    this.soft(520, 0.1, 0.05, { from: 0.9, cutoff: 1800, attack: 0.006 });
+    this.soft(260, 0.09, 0.03, { cutoff: 600, attack: 0.006 });
   }
 
   buy() {
@@ -329,36 +395,283 @@ export class Sound {
     );
   }
 
-  // ---------------- Атмосферный бесшовный пэд (строго во время забега) ----------------
+  // ---------------- Генеративная музыка ----------------
 
-  private ensurePadRunning() {
-    if (!this.ctx || !this.master || this.padSource) return;
-    const ctx = this.ctx;
-    if (!this.padBuffer) {
-      this.padBuffer = createSeamlessPadBuffer(ctx);
-    }
+  private buildMusicGraph(ctx: AudioContext) {
+    const musicBus = ctx.createGain();
+    musicBus.gain.value = this.musicLevel();
+    musicBus.connect(this.master!);
+    this.musicBus = musicBus;
 
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 680;
-    filter.Q.value = 0.6;
+    // общий «зал»
+    const conv = ctx.createConvolver();
+    conv.buffer = createReverbIR(ctx);
+    const wet = ctx.createGain();
+    wet.gain.value = 0.85;
+    conv.connect(wet);
+    wet.connect(musicBus);
+    const reverbIn = ctx.createGain();
+    reverbIn.connect(conv);
 
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    const mkBranch = (send: number) => {
+      const bus = ctx.createGain();
+      bus.gain.value = 0;
+      bus.connect(musicBus);
+      const sg = ctx.createGain();
+      sg.gain.value = send;
+      bus.connect(sg);
+      sg.connect(reverbIn);
+      return bus;
+    };
+    this.menuBus = mkBranch(0.75);
+    this.gameBus = mkBranch(0.5);
 
-    const src = ctx.createBufferSource();
-    src.buffer = this.padBuffer;
-    src.loop = true;
+    // пэды забега (мягко приглушены)
+    const padLp = ctx.createBiquadFilter();
+    padLp.type = 'lowpass';
+    padLp.frequency.value = 760;
+    padLp.Q.value = 0.4;
+    const padIn = ctx.createGain();
+    padIn.connect(padLp);
+    padLp.connect(this.gameBus);
+    this.padIn = padIn;
 
-    src.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.master);
-    src.start();
-
-    this.padSource = src;
-    this.padFilter = filter;
-    this.padGain = gain;
+    // щипки забега: фильтр + эхо «пунктиром»
+    const pluckIn = ctx.createGain();
+    const pluckFilter = ctx.createBiquadFilter();
+    pluckFilter.type = 'lowpass';
+    pluckFilter.frequency.value = 1700;
+    pluckFilter.Q.value = 0.5;
+    pluckIn.connect(pluckFilter);
+    pluckFilter.connect(this.gameBus);
+    const delay = ctx.createDelay(1.5);
+    delay.delayTime.value = GAME_STEP * 3; // восьмая с точкой
+    const fb = ctx.createGain();
+    fb.gain.value = 0.36;
+    const dLp = ctx.createBiquadFilter();
+    dLp.type = 'lowpass';
+    dLp.frequency.value = 1500;
+    pluckFilter.connect(delay);
+    delay.connect(dLp);
+    dLp.connect(fb);
+    fb.connect(delay);
+    const dOut = ctx.createGain();
+    dOut.gain.value = 0.55;
+    dLp.connect(dOut);
+    dOut.connect(this.gameBus);
+    this.pluckIn = pluckIn;
+    this.pluckFilter = pluckFilter;
   }
+
+  private startMusicLoop() {
+    if (this.musicTimer !== null || !this.ctx) return;
+    this.setMusicMode(this.musicMode, true);
+    this.musicTimer = window.setInterval(() => this.musicTick(), 180);
+    this.musicTick();
+  }
+
+  private setMusicMode(mode: 'menu' | 'game', force = false) {
+    const ctx = this.ctx;
+    if (!ctx || !this.menuBus || !this.gameBus) {
+      this.musicMode = mode;
+      return;
+    }
+    if (mode === this.musicMode && !force) return;
+    this.musicMode = mode;
+    const t = ctx.currentTime;
+    this.menuBus.gain.cancelScheduledValues(t);
+    this.gameBus.gain.cancelScheduledValues(t);
+    this.menuBus.gain.setTargetAtTime(mode === 'menu' ? 1 : 0, t, mode === 'menu' ? 1.1 : 0.35);
+    this.gameBus.gain.setTargetAtTime(mode === 'game' ? 1 : 0, t, mode === 'game' ? 0.7 : 0.35);
+    this.musicT0 = t + 0.12;
+    this.chordN = 0;
+    this.stepN = 0;
+    this.sparkN = 0;
+  }
+
+  private musicTick() {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running' || this._muted || this.musicVol <= 0.001) return;
+    const now = ctx.currentTime;
+    const horizon = now + 1.1;
+
+    if (this.musicMode === 'menu') {
+      // если планировщик заснул (вкладка в фоне) — начинаем заново, не догоняя пропущенное
+      if (this.musicT0 + this.chordN * MENU_CHORD_DUR < now - 1) {
+        this.musicT0 = now + 0.1;
+        this.chordN = 0;
+        this.sparkN = 0;
+      }
+      while (this.musicT0 + this.chordN * MENU_CHORD_DUR < horizon) {
+        this.playMenuChord(this.musicT0 + this.chordN * MENU_CHORD_DUR, MENU_CHORDS[this.chordN % MENU_CHORDS.length]);
+        this.chordN++;
+      }
+      const SPARK = 1.6;
+      while (this.musicT0 + this.sparkN * SPARK < horizon) {
+        const t = this.musicT0 + this.sparkN * SPARK;
+        const ci = Math.floor(this.sparkN * SPARK / MENU_CHORD_DUR) % MENU_CHORDS.length;
+        // редкие, почти случайные «капли» света из тонов аккорда
+        if (this.sparkN % 2 === 0 || Math.random() < 0.35) {
+          const ch = MENU_CHORDS[ci];
+          const f = ch.spark[(this.sparkN * 3 + Math.floor(Math.random() * 2)) % ch.spark.length];
+          this.musicPluck(f, t, 2.6, 0.05, 'menu');
+        }
+        this.sparkN++;
+      }
+    } else {
+      if (this.musicT0 + this.stepN * GAME_STEP < now - 1) {
+        this.musicT0 = now + 0.1;
+        this.stepN = 0;
+      }
+      while (this.musicT0 + this.stepN * GAME_STEP < horizon) {
+        this.playGameStep(this.musicT0 + this.stepN * GAME_STEP, this.stepN);
+        this.stepN++;
+      }
+    }
+  }
+
+  /** Мягкий голос пэда: две слегка расстроенные волны, медленная атака и долгий выход. */
+  private padVoice(dest: AudioNode, f: number, t: number, dur: number, vol: number, attack: number, release: number) {
+    const ctx = this.ctx!;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + attack);
+    g.gain.setValueAtTime(vol, t + Math.max(attack, dur - release * 0.4));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + release);
+    g.connect(dest);
+    const end = t + dur + release + 0.05;
+    const mk = (type: OscillatorType, detune: number, k: number) => {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      o.detune.value = detune;
+      const og = ctx.createGain();
+      og.gain.value = k;
+      o.connect(og);
+      og.connect(g);
+      o.start(t);
+      o.stop(end);
+      o.onended = () => {
+        og.disconnect();
+        if (type === 'sine' && detune < 0) g.disconnect();
+      };
+    };
+    mk('sine', -6, 0.6);
+    mk('triangle', 6, 0.4);
+  }
+
+  /** Тёплая мягкая нота (щипок/колокольчик без резкой атаки). */
+  private musicPluck(f: number, t: number, dur: number, vol: number, where: 'menu' | 'game') {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const dest = where === 'menu' ? this.menuBus : this.pluckIn;
+    if (!dest) return;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = f;
+    const o2 = ctx.createOscillator();
+    o2.type = 'triangle';
+    o2.frequency.value = f * 2;
+    const g2 = ctx.createGain();
+    g2.gain.value = 0.16;
+    o.connect(g);
+    o2.connect(g2);
+    g2.connect(g);
+    g.connect(dest);
+    o.start(t);
+    o2.start(t);
+    o.stop(t + dur + 0.05);
+    o2.stop(t + dur + 0.05);
+    o.onended = () => {
+      g.disconnect();
+      g2.disconnect();
+    };
+  }
+
+  private musicBass(f: number, t: number, dur: number, vol: number, dest: AudioNode) {
+    const ctx = this.ctx!;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 320;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = f;
+    const o2 = ctx.createOscillator();
+    o2.type = 'sine';
+    o2.frequency.value = f * 2;
+    const g2 = ctx.createGain();
+    g2.gain.value = 0.3;
+    o.connect(lp);
+    o2.connect(g2);
+    g2.connect(lp);
+    lp.connect(g);
+    g.connect(dest);
+    o.start(t);
+    o2.start(t);
+    o.stop(t + dur + 0.05);
+    o2.stop(t + dur + 0.05);
+    o.onended = () => {
+      g.disconnect();
+      lp.disconnect();
+      g2.disconnect();
+    };
+  }
+
+  /** Меню: глубокий медленный аккорд + бас. */
+  private playMenuChord(t: number, ch: (typeof MENU_CHORDS)[number]) {
+    if (!this.menuBus || !this.ctx) return;
+    if (!this.menuLp) {
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 900;
+      lp.Q.value = 0.35;
+      // медленное «дыхание» тембра
+      const lfo = this.ctx.createOscillator();
+      lfo.frequency.value = 0.06;
+      const lg = this.ctx.createGain();
+      lg.gain.value = 260;
+      lfo.connect(lg);
+      lg.connect(lp.frequency);
+      lfo.start();
+      lp.connect(this.menuBus);
+      this.menuLp = lp;
+    }
+    for (const f of ch.pad) this.padVoice(this.menuLp, f, t, MENU_CHORD_DUR, 0.045, 2.6, 3.2);
+    this.musicBass(ch.bass, t, MENU_CHORD_DUR + 1.2, 0.2, this.menuBus);
+    // чуть позже — высокий тихий «воздух» над аккордом
+    this.padVoice(this.menuLp, ch.pad[ch.pad.length - 1] * 2, t + 1.2, MENU_CHORD_DUR - 2, 0.016, 3, 3);
+  }
+
+  /** Забег: пэд на два такта, бас, арпеджио восьмыми и мелодия по четвертям. */
+  private playGameStep(t: number, n: number) {
+    if (!this.padIn || !this.gameBus) return;
+    const ci = Math.floor(n / 16) % GAME_CHORDS.length;
+    const s = n % 16;
+    const ch = GAME_CHORDS[ci];
+    if (s === 0) {
+      for (const f of ch.pad) this.padVoice(this.padIn, f, t, GAME_STEP * 16, 0.04, 0.9, 1.6);
+    }
+    if (s % 8 === 0) this.musicBass(ch.bass, t, GAME_STEP * 5, 0.2, this.gameBus);
+    else if (s % 8 === 6) this.musicBass(ch.bass * (s === 6 ? 1 : 1.5), t, GAME_STEP * 1.6, 0.12, this.gameBus);
+    // арпеджио
+    const ai = ARP_PATTERN[s % 8];
+    this.musicPluck(ch.arp[ai], t, 0.9, s % 2 === 0 ? 0.036 : 0.024, 'game');
+    // мелодия (каждая четверть)
+    if (s % 2 === 0) {
+      const m = ch.mel[s / 2];
+      if (m) this.musicPluck(m, t, 1.5, 0.058, 'game');
+    }
+  }
+
+  private menuLp: BiquadFilterNode | null = null;
 
   startDrone() {
     this.ensure();
@@ -367,12 +680,8 @@ export class Sound {
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
-    this.ensurePadRunning();
-    if (this.padGain) {
-      const t = this.ctx.currentTime;
-      this.padGain.gain.cancelScheduledValues(t);
-      this.padGain.gain.setTargetAtTime(this.targetPadGain(), t, 0.45);
-    }
+    this.setMusicMode('game');
+    this.startMusicLoop();
     this.lastPulseAt = this.ctx.currentTime;
   }
 
@@ -381,10 +690,10 @@ export class Sound {
     if (!this.droneActive || !this.ctx) return;
     const t = this.ctx.currentTime;
 
-    if (this.padFilter) {
-      // На скорости пэд мягко раскрывается по тембру, в густой темноте — приглушается
-      const cutoff = (620 + v * 520) * (1 - danger * 0.35);
-      this.padFilter.frequency.setTargetAtTime(Math.max(280, cutoff), t, 0.25);
+    if (this.pluckFilter) {
+      // На скорости мелодия мягко раскрывается по тембру, в густой темноте — приглушается
+      const cutoff = (1500 + v * 1500) * (1 - danger * 0.45);
+      this.pluckFilter.frequency.setTargetAtTime(Math.max(600, cutoff), t, 0.3);
     }
 
     // Деликатный мягкий пульс «сердца» только при критической нехватке света (< 26%)
@@ -399,25 +708,19 @@ export class Sound {
     }
   }
 
+  /** Останавливает музыку забега — возвращается спокойная музыка меню. */
   stopDrone() {
     this.droneActive = false;
-    if (!this.ctx || !this.padGain) return;
-    const t = this.ctx.currentTime;
-    this.padGain.gain.cancelScheduledValues(t);
-    this.padGain.gain.setTargetAtTime(0, t, 0.14);
+    this.setMusicMode('menu');
   }
 
   dispose() {
-    this.stopDrone();
-    try {
-      this.padSource?.stop();
-      this.padSource?.disconnect();
-    } catch {
-      /* ignore */
+    this.droneActive = false;
+    if (this.musicTimer !== null) {
+      window.clearInterval(this.musicTimer);
+      this.musicTimer = null;
     }
-    this.padSource = null;
-    this.padFilter = null;
-    this.padGain = null;
+    this.menuLp = null;
     this.ctx?.close().catch(() => {});
     this.ctx = null;
   }

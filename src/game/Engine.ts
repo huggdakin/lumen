@@ -52,7 +52,7 @@ export interface GameResult {
   flowMax: number;
 }
 
-type Kind = 'orb' | 'shard' | 'flash' | 'magnet' | 'overcharge' | 'wall' | 'drifter';
+type Kind = 'orb' | 'shard' | 'flash' | 'magnet' | 'overcharge' | 'wall' | 'hunter';
 
 interface Entity {
   mesh: THREE.Object3D;
@@ -91,12 +91,19 @@ interface SharedEntityAssets {
 
   shardGeo: THREE.OctahedronGeometry;
   shardMat: THREE.MeshLambertMaterial;
-  shardEdgesGeo: THREE.EdgesGeometry;
-  shardEdgeMat: THREE.LineBasicMaterial;
+  shardEdgesGeo: THREE.BufferGeometry; // тонкая кромка: трубки по рёбрам
+  shardEdgeMat: THREE.MeshBasicMaterial;
+  shardRimGeo: THREE.BufferGeometry; // мягкое свечение кромки
+  shardRimMat: THREE.MeshBasicMaterial;
   shardGlowMat: THREE.SpriteMaterial;
 
-  flashGeo: THREE.IcosahedronGeometry;
-  flashMat: THREE.MeshBasicMaterial;
+  // Вспышка — молния
+  boltGeo: THREE.BufferGeometry;
+  boltMat: THREE.MeshBasicMaterial;
+  boltEdgesGeo: THREE.BufferGeometry;
+  boltEdgeMat: THREE.LineBasicMaterial;
+  flashRingGeo: THREE.TorusGeometry;
+  flashRingMat: THREE.MeshBasicMaterial;
   flashGlowMat: THREE.SpriteMaterial;
 
   magnetUGeo: THREE.TorusGeometry;
@@ -105,25 +112,34 @@ interface SharedEntityAssets {
   magnetTipMat: THREE.MeshLambertMaterial;
   magnetGlowMat: THREE.SpriteMaterial;
 
-  drifterCoreGeo: THREE.OctahedronGeometry;
-  drifterCoreMat: THREE.MeshLambertMaterial;
-  drifterLegsGeo: THREE.BufferGeometry;
-  drifterLegsMat: THREE.LineBasicMaterial;
-  drifterGlowMat: THREE.SpriteMaterial;
+  // Мина-охотник: ядро, шипы и тонкое светящееся кольцо
+  hunterCoreGeo: THREE.IcosahedronGeometry;
+  hunterCoreMat: THREE.MeshLambertMaterial;
+  hunterSpikeGeo: THREE.BufferGeometry;
+  hunterSpikeMat: THREE.MeshLambertMaterial;
+  hunterRingGeo: THREE.TorusGeometry;
+  hunterRingMat: THREE.MeshBasicMaterial;
+  hunterGlowMat: THREE.SpriteMaterial;
 
-  overCellGeo: THREE.CylinderGeometry;
-  overCellMat: THREE.MeshLambertMaterial;
-  overCapGeo: THREE.CylinderGeometry;
-  overCapMat: THREE.MeshBasicMaterial;
-  overRingGeo: THREE.TorusGeometry;
-  overRingMat: THREE.MeshBasicMaterial;
+  // Перезарядка — батарея с зарядом
+  battBodyGeo: THREE.BoxGeometry;
+  battBodyMat: THREE.MeshLambertMaterial;
+  battTipGeo: THREE.BoxGeometry;
+  battTipMat: THREE.MeshBasicMaterial;
+  battBarGeo: THREE.BoxGeometry;
+  battBarMat: THREE.MeshBasicMaterial;
+  battEdgesGeo: THREE.EdgesGeometry;
+  battEdgeMat: THREE.LineBasicMaterial;
   overGlowMat: THREE.SpriteMaterial;
 
   wallArcGeo: THREE.TorusGeometry;
   wallArcMat: THREE.MeshLambertMaterial;
   wallRimGeo: THREE.TorusGeometry;
   wallRimMat: THREE.MeshBasicMaterial;
+  wallRimSoftMat: THREE.MeshBasicMaterial;
   wallGlowMat: THREE.SpriteMaterial;
+  wallCrestGeo: THREE.TorusGeometry;
+  wallEndGeo: THREE.TorusGeometry;
   wallOutlineGeo: THREE.TorusGeometry;
   wallOutlineMat: THREE.MeshBasicMaterial;
   haloMat: THREE.SpriteMaterial;
@@ -145,8 +161,11 @@ const COMBO_HOLD = 2.4;
 const RADAR_RANGE = 115;
 const FLOW_TIME = 6;
 const FLOW_STACK = 4;
-const WALL_ARC = 3.7; // ~212° занимает стена, остальное — зев
+const OBST_SCALE = 0.85; // все препятствия на 15% меньше
+const BUFF_SCALE = 1.22; // все баффы на 22% больше
+const WALL_ARC = 3.7 * OBST_SCALE; // ~180° занимает стена, остальное — зев
 const WALL_SPIN = 0.48; // рад/с вращения стены на единицу спина (+20% динамики)
+const TRAIL_N = 14;
 const POP_W = 560;
 const POP_H = 140;
 
@@ -191,13 +210,55 @@ function makeDarkHaloTexture(): THREE.Texture {
 const HAZARD_NORMAL = {
   shardBody: 0x1a092b, shardEm: 0x820046, shardEdge: 0xff2f74, shardGlow: 0xff2f74,
   wallBody: 0x2a0a1e, wallEm: 0xff2f74, wallRim: 0xff5c8a, wallGlow: 0xff2f74,
-  driftBody: 0x2b1000, driftEm: 0xff7a14, driftLeg: 0xff9a2e, driftGlow: 0xff8a1f,
+  huntBody: 0x2b1000, huntEm: 0xff7a14, huntLeg: 0xff9a2e, huntGlow: 0xff8a1f,
 };
 const HAZARD_COLD = {
   shardBody: 0x06122c, shardEm: 0x1f58c8, shardEdge: 0xe6f4ff, shardGlow: 0x7fb4ff,
   wallBody: 0x06122c, wallEm: 0x2a62d8, wallRim: 0xe6f4ff, wallGlow: 0x7fb4ff,
-  driftBody: 0x06122c, driftEm: 0x3f86ff, driftLeg: 0xcfe6ff, driftGlow: 0x8fc0ff,
+  huntBody: 0x06122c, huntEm: 0x3f86ff, huntLeg: 0xcfe6ff, huntGlow: 0x8fc0ff,
 };
+
+/** Тонкие трубки по рёбрам (EdgesGeometry): настоящая светящаяся кромка, видимая на любой дистанции. */
+function tubesFromEdges(edges: THREE.BufferGeometry, radius: number): THREE.BufferGeometry {
+  const pos = edges.getAttribute('position');
+  const list: THREE.BufferGeometry[] = [];
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  const one = new THREE.Vector3(1, 1, 1);
+  for (let i = 0; i + 1 < pos.count; i += 2) {
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, i + 1);
+    dir.subVectors(b, a);
+    const len = dir.length();
+    if (len < 1e-4) continue;
+    dir.normalize();
+    const g = new THREE.CylinderGeometry(radius, radius, len, 5, 1, true);
+    g.applyMatrix4(new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5), new THREE.Quaternion().setFromUnitVectors(up, dir), one));
+    list.push(g);
+  }
+  return mergeSimpleGeometries(list);
+}
+
+/** Молния для баффа «Вспышка»: узнаваемый зигзаг, выдавленный в объём. */
+function makeBoltGeometry(): THREE.BufferGeometry {
+  const sh = new THREE.Shape();
+  const pts: [number, number][] = [
+    [0.04, 0.62],
+    [0.34, 0.62],
+    [0.13, 0.12],
+    [0.34, 0.12],
+    [-0.16, -0.66],
+    [-0.04, -0.06],
+    [-0.3, -0.06],
+  ];
+  pts.forEach(([x, y], i) => (i === 0 ? sh.moveTo(x, y) : sh.lineTo(x, y)));
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: 0.16, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1 });
+  g.translate(0, 0, -0.08);
+  return g;
+}
 
 function roundRectPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   c.beginPath();
@@ -328,6 +389,8 @@ export class Engine {
   private zeroRipples: { mesh: THREE.Mesh; t: number }[] = [];
   private auraMesh: THREE.Mesh;
   private trail: THREE.Sprite[] = [];
+  private trailAng: number[] = []; // «мировой» угол каждого звена шлейфа
+  private trailVis = 0;
 
   private ambient: THREE.AmbientLight;
   private tmpV = new THREE.Vector3();
@@ -757,21 +820,23 @@ export class Engine {
     this.magnetGroup.visible = false;
     this.player.add(this.magnetGroup);
 
-    // Шлейф за искрой
-    for (let i = 0; i < 10; i++) {
+    // Шлейф за искрой: цепочка мягких огоньков, которая тянется за героем при смещении по кругу
+    for (let i = 0; i < TRAIL_N; i++) {
       const s = new THREE.Sprite(
         new THREE.SpriteMaterial({
           map: this.glowTex,
           color: this.skin.trail,
           transparent: true,
-          opacity: Math.max(0.05, 0.48 - i * 0.044),
+          opacity: 0,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
         })
       );
-      s.scale.setScalar((1.65 - i * 0.12) * PLAYER_SCALE);
+      s.scale.setScalar((1.0 - (i / TRAIL_N) * 0.72) * PLAYER_SCALE);
+      s.visible = false;
       this.scene.add(s);
       this.trail.push(s);
+      this.trailAng.push(0);
     }
 
     // Эффекты тоннеля «Нулевая точка» (видны только в нём)
@@ -852,20 +917,29 @@ export class Engine {
   /** Общие геометрии и материалы всех объектов тоннеля — создаются 1 раз. */
   private buildSharedAssets(): SharedEntityAssets {
     const shardGeo = new THREE.OctahedronGeometry(0.8, 0);
-    const shardEdgesGeo = new THREE.EdgesGeometry(shardGeo);
+    const shardEdges = new THREE.EdgesGeometry(shardGeo);
+    const shardEdgesGeo = tubesFromEdges(shardEdges, 0.026);
+    const shardRimGeo = tubesFromEdges(shardEdges, 0.075);
+    shardEdges.dispose();
 
-    // 6 щупалец Дрейфуна в едином буфере LineSegments (1 draw call вместо 6)
-    const legPts: number[] = [];
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      const mx = Math.cos(a) * 0.6;
-      const my = Math.sin(a) * 0.6;
-      const ex = Math.cos(a) * 1.1;
-      const ey = Math.sin(a) * 1.1;
-      legPts.push(0, 0, 0, mx, my, 0, mx, my, 0, ex, ey, 0.2);
+    const boltGeo = makeBoltGeometry();
+    const boltEdgesGeo = new THREE.EdgesGeometry(boltGeo, 30);
+
+    // Мина-охотник: 12 шипов по вершинам икосаэдра
+    const spikeParts: THREE.BufferGeometry[] = [];
+    const ico = new THREE.IcosahedronGeometry(1, 0).getAttribute('position');
+    const seen: THREE.Vector3[] = [];
+    for (let i = 0; i < ico.count; i++) {
+      const v = new THREE.Vector3().fromBufferAttribute(ico, i).normalize();
+      if (seen.some((o) => o.distanceTo(v) < 0.01)) continue;
+      seen.push(v);
+      const cone = new THREE.ConeGeometry(0.1, 0.46, 5, 1);
+      cone.translate(0, 0.23 + 0.34, 0);
+      cone.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), v));
+      spikeParts.push(cone);
     }
-    const drifterLegsGeo = new THREE.BufferGeometry();
-    drifterLegsGeo.setAttribute('position', new THREE.Float32BufferAttribute(legPts, 3));
+    const hunterSpikeGeo = mergeSimpleGeometries(spikeParts);
+    hunterSpikeGeo.computeVertexNormals();
 
     const mkGlowMat = (color: number, opacity = 1) =>
       new THREE.SpriteMaterial({
@@ -886,11 +960,17 @@ export class Engine {
       shardGeo,
       shardMat: new THREE.MeshLambertMaterial({ color: HAZARD_NORMAL.shardBody, emissive: HAZARD_NORMAL.shardEm, emissiveIntensity: 1.1 }),
       shardEdgesGeo,
-      shardEdgeMat: new THREE.LineBasicMaterial({ color: HAZARD_NORMAL.shardEdge }),
-      shardGlowMat: mkGlowMat(HAZARD_NORMAL.shardGlow, 0.55),
+      shardEdgeMat: new THREE.MeshBasicMaterial({ color: HAZARD_NORMAL.shardEdge }),
+      shardRimGeo,
+      shardRimMat: new THREE.MeshBasicMaterial({ color: HAZARD_NORMAL.shardEdge, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }),
+      shardGlowMat: mkGlowMat(HAZARD_NORMAL.shardGlow, 0.5),
 
-      flashGeo: new THREE.IcosahedronGeometry(0.42, 0),
-      flashMat: new THREE.MeshBasicMaterial({ color: 0x6ef7d8, wireframe: true }),
+      boltGeo,
+      boltMat: new THREE.MeshBasicMaterial({ color: 0xd8fff6 }),
+      boltEdgesGeo,
+      boltEdgeMat: new THREE.LineBasicMaterial({ color: 0x1fd8b4 }),
+      flashRingGeo: new THREE.TorusGeometry(0.78, 0.022, 4, 40),
+      flashRingMat: new THREE.MeshBasicMaterial({ color: 0x6ef7d8, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }),
       flashGlowMat: mkGlowMat(0x6ef7d8, 1),
 
       magnetUGeo: new THREE.TorusGeometry(0.4, 0.13, 8, 20, Math.PI),
@@ -899,29 +979,28 @@ export class Engine {
       magnetTipMat: new THREE.MeshLambertMaterial({ color: 0xe8ecff, emissive: 0xc3aaff, emissiveIntensity: 0.85 }),
       magnetGlowMat: mkGlowMat(0xc3aaff, 1),
 
-      drifterCoreGeo: new THREE.OctahedronGeometry(0.55, 0),
-      drifterCoreMat: new THREE.MeshLambertMaterial({ color: HAZARD_NORMAL.driftBody, emissive: HAZARD_NORMAL.driftEm, emissiveIntensity: 1.0 }),
-      drifterLegsGeo,
-      drifterLegsMat: new THREE.LineBasicMaterial({ color: HAZARD_NORMAL.driftLeg, transparent: true, opacity: 0.95 }),
-      drifterGlowMat: mkGlowMat(HAZARD_NORMAL.driftGlow, 0.65),
+      hunterCoreGeo: new THREE.IcosahedronGeometry(0.42, 1),
+      hunterCoreMat: new THREE.MeshLambertMaterial({ color: HAZARD_NORMAL.huntBody, emissive: HAZARD_NORMAL.huntEm, emissiveIntensity: 1.0 }),
+      hunterSpikeGeo,
+      hunterSpikeMat: new THREE.MeshLambertMaterial({ color: HAZARD_NORMAL.huntBody, emissive: HAZARD_NORMAL.huntEm, emissiveIntensity: 0.7 }),
+      hunterRingGeo: new THREE.TorusGeometry(0.74, 0.02, 4, 44),
+      hunterRingMat: new THREE.MeshBasicMaterial({ color: HAZARD_NORMAL.huntLeg, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }),
+      hunterGlowMat: mkGlowMat(HAZARD_NORMAL.huntGlow, 0.6),
 
-      overCellGeo: new THREE.CylinderGeometry(0.26, 0.26, 0.6, 10),
-      overCellMat: new THREE.MeshLambertMaterial({ color: 0x0d3a12, emissive: 0x39ff6a, emissiveIntensity: 0.95 }),
-      overCapGeo: new THREE.CylinderGeometry(0.11, 0.11, 0.14, 8),
-      overCapMat: new THREE.MeshBasicMaterial({ color: 0xd6ffe0 }),
-      overRingGeo: new THREE.TorusGeometry(0.52, 0.035, 5, 24),
-      overRingMat: new THREE.MeshBasicMaterial({
-        color: 0x7dff6a,
-        transparent: true,
-        opacity: 0.9,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
+      battBodyGeo: new THREE.BoxGeometry(1.0, 0.56, 0.3),
+      battBodyMat: new THREE.MeshLambertMaterial({ color: 0x0c3412, emissive: 0x1d8a36, emissiveIntensity: 0.65 }),
+      battTipGeo: new THREE.BoxGeometry(0.11, 0.24, 0.2),
+      battTipMat: new THREE.MeshBasicMaterial({ color: 0xd6ffe0 }),
+      battBarGeo: new THREE.BoxGeometry(0.2, 0.34, 0.06),
+      battBarMat: new THREE.MeshBasicMaterial({ color: 0x8dff6a }),
+      battEdgesGeo: new THREE.EdgesGeometry(new THREE.BoxGeometry(1.0, 0.56, 0.3)),
+      battEdgeMat: new THREE.LineBasicMaterial({ color: 0xb6ffa0 }),
       overGlowMat: mkGlowMat(0x7dff6a, 1),
 
-      wallArcGeo: new THREE.TorusGeometry(TUNNEL_R - 0.14, 0.42, 7, 42, WALL_ARC),
+      wallArcGeo: new THREE.TorusGeometry(TUNNEL_R - 0.14, 0.42 * OBST_SCALE, 7, 42, WALL_ARC),
       wallArcMat: new THREE.MeshLambertMaterial({ color: HAZARD_NORMAL.wallBody, emissive: HAZARD_NORMAL.wallEm, emissiveIntensity: 0.85 }),
-      wallRimGeo: new THREE.TorusGeometry(TUNNEL_R - 0.14, 0.09, 5, 42, WALL_ARC),
+      // тонкая светящаяся кромка: гребень арки + кольца на торцах
+      wallRimGeo: new THREE.TorusGeometry(TUNNEL_R - 0.14 - 0.42 * OBST_SCALE, 0.03, 4, 42, WALL_ARC),
       wallRimMat: new THREE.MeshBasicMaterial({
         color: HAZARD_NORMAL.wallRim,
         transparent: true,
@@ -929,8 +1008,11 @@ export class Engine {
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
-      wallGlowMat: mkGlowMat(HAZARD_NORMAL.wallGlow, 0.32),
-      wallOutlineGeo: new THREE.TorusGeometry(TUNNEL_R - 0.14, 0.6, 7, 42, WALL_ARC),
+      wallRimSoftMat: new THREE.MeshBasicMaterial({ color: HAZARD_NORMAL.wallRim, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }),
+      wallGlowMat: mkGlowMat(HAZARD_NORMAL.wallGlow, 0.28),
+      wallCrestGeo: new THREE.TorusGeometry(TUNNEL_R - 0.14 - 0.42 * OBST_SCALE, 0.07, 4, 42, WALL_ARC),
+      wallEndGeo: new THREE.TorusGeometry(0.42 * OBST_SCALE, 0.03, 4, 22),
+      wallOutlineGeo: new THREE.TorusGeometry(TUNNEL_R - 0.14, 0.6 * OBST_SCALE, 7, 42, WALL_ARC),
       wallOutlineMat: new THREE.MeshBasicMaterial({ color: 0x02030a, transparent: true, opacity: 0.8, side: THREE.BackSide, depthWrite: false }),
       haloMat: new THREE.SpriteMaterial({ map: this.darkTex, transparent: true, opacity: 0.7, depthWrite: false }),
       haloSoftMat: new THREE.SpriteMaterial({ map: this.darkTex, transparent: true, opacity: 0.4, depthWrite: false }),
@@ -1059,7 +1141,7 @@ export class Engine {
     this.comboT = 0;
     this.setShield(true);
     for (const e of this.entities) {
-      if (e.alive && (e.kind === 'shard' || e.kind === 'wall' || e.kind === 'drifter') && e.z > -75) {
+      if (e.alive && (e.kind === 'shard' || e.kind === 'wall' || e.kind === 'hunter') && e.z > -75) {
         this.kill(e);
       }
     }
@@ -1233,15 +1315,19 @@ export class Engine {
     A.shardMat.color.setHex(H.shardBody);
     A.shardMat.emissive.setHex(H.shardEm);
     A.shardEdgeMat.color.setHex(H.shardEdge);
+    A.shardRimMat.color.setHex(H.shardEdge);
     A.shardGlowMat.color.setHex(H.shardGlow);
     A.wallArcMat.color.setHex(H.wallBody);
     A.wallArcMat.emissive.setHex(H.wallEm);
     A.wallRimMat.color.setHex(H.wallRim);
+    A.wallRimSoftMat.color.setHex(H.wallRim);
     A.wallGlowMat.color.setHex(H.wallGlow);
-    A.drifterCoreMat.color.setHex(H.driftBody);
-    A.drifterCoreMat.emissive.setHex(H.driftEm);
-    A.drifterLegsMat.color.setHex(H.driftLeg);
-    A.drifterGlowMat.color.setHex(H.driftGlow);
+    A.hunterCoreMat.color.setHex(H.huntBody);
+    A.hunterCoreMat.emissive.setHex(H.huntEm);
+    A.hunterSpikeMat.color.setHex(H.huntBody);
+    A.hunterSpikeMat.emissive.setHex(H.huntEm);
+    A.hunterRingMat.color.setHex(H.huntLeg);
+    A.hunterGlowMat.color.setHex(H.huntGlow);
     // На холодной палитре подложка плотнее — красный фон не «просвечивает» сквозь объекты
     A.haloMat.opacity = cold ? 0.85 : 0.7;
   }
@@ -1333,7 +1419,9 @@ export class Engine {
     this.lastT = performance.now();
     this.hudT = 0;
     this.fog.density = this.fogBase;
-    this.trail.forEach((t) => t.position.copy(this.player.position));
+    this.trailAng.fill(this.playerAngle);
+    this.trailVis = 0;
+    this.trail.forEach((t) => (t.visible = false));
   }
 
   private createEntityMesh(kind: Kind): { mesh: THREE.Object3D; radius: number; spinner?: THREE.Object3D } {
@@ -1344,19 +1432,32 @@ export class Engine {
     if (kind === 'wall') {
       const outline = new THREE.Mesh(A.wallOutlineGeo, A.wallOutlineMat);
       const arc = new THREE.Mesh(A.wallArcGeo, A.wallArcMat);
-      const rim = new THREE.Mesh(A.wallRimGeo, A.wallRimMat);
+      const crest = new THREE.Mesh(A.wallRimGeo, A.wallRimMat);
+      const crestGlow = new THREE.Mesh(A.wallCrestGeo, A.wallRimMat);
+      crestGlow.material = A.wallRimSoftMat;
       const glow = new THREE.Sprite(A.wallGlowMat);
-      glow.scale.setScalar(4.6);
-      g.add(outline, arc, rim, glow);
+      glow.scale.setScalar(4.2);
+      g.add(outline, arc, crest, crestGlow, glow);
+      // тонкие светящиеся кольца на торцах арки
+      const R = TUNNEL_R - 0.14;
+      for (const ang of [0, WALL_ARC]) {
+        const holder = new THREE.Group();
+        holder.position.set(Math.cos(ang) * R, Math.sin(ang) * R, 0);
+        holder.rotation.z = ang;
+        const ring = new THREE.Mesh(A.wallEndGeo, A.wallRimMat);
+        ring.rotation.x = Math.PI / 2;
+        holder.add(ring);
+        g.add(holder);
+      }
       this.world.add(g);
       return { mesh: g, radius: 0 };
     }
 
     // Тёмная подложка не вращается и лежит чуть дальше от камеры, чем сам объект
     const spinner = new THREE.Group();
-    const hazard = kind === 'shard' || kind === 'drifter';
+    const hazard = kind === 'shard' || kind === 'hunter';
     const halo = new THREE.Sprite(hazard ? A.haloMat : A.haloSoftMat);
-    halo.scale.setScalar(hazard ? 3.0 : 1.9);
+    halo.scale.setScalar(hazard ? 3.0 * OBST_SCALE : 1.9 * (kind === 'orb' ? 1 : BUFF_SCALE));
     halo.position.z = -0.7;
     g.add(halo, spinner);
 
@@ -1368,17 +1469,22 @@ export class Engine {
       spinner.add(orbHalo);
     } else if (kind === 'shard') {
       const body = new THREE.Mesh(A.shardGeo, A.shardMat);
-      const edges = new THREE.LineSegments(A.shardEdgesGeo, A.shardEdgeMat);
+      const edges = new THREE.Mesh(A.shardEdgesGeo, A.shardEdgeMat);
+      const rim = new THREE.Mesh(A.shardRimGeo, A.shardRimMat);
       const glow = new THREE.Sprite(A.shardGlowMat);
       glow.scale.setScalar(2.6);
-      spinner.add(body, edges, glow);
-      spinner.scale.setScalar(1.12);
+      spinner.add(body, edges, rim, glow);
+      spinner.scale.setScalar(1.12 * OBST_SCALE);
       radius = PLAYER_R + 0.12;
     } else if (kind === 'flash') {
-      const core = new THREE.Mesh(A.flashGeo, A.flashMat);
+      // Молния в кольце: считывается как «взрыв/энергия»
+      const bolt = new THREE.Mesh(A.boltGeo, A.boltMat);
+      const edges = new THREE.LineSegments(A.boltEdgesGeo, A.boltEdgeMat);
+      const ring = new THREE.Mesh(A.flashRingGeo, A.flashRingMat);
       const glow = new THREE.Sprite(A.flashGlowMat);
-      glow.scale.setScalar(2.6);
-      spinner.add(core, glow);
+      glow.scale.setScalar(2.7);
+      spinner.add(ring, glow, bolt, edges);
+      spinner.scale.setScalar(BUFF_SCALE);
     } else if (kind === 'magnet') {
       const u = new THREE.Mesh(A.magnetUGeo, A.magnetUMat);
       u.rotation.z = Math.PI;
@@ -1389,22 +1495,34 @@ export class Engine {
       const glow = new THREE.Sprite(A.magnetGlowMat);
       glow.scale.setScalar(2.8);
       spinner.add(u, tipL, tipR, glow);
-    } else if (kind === 'drifter') {
-      const core = new THREE.Mesh(A.drifterCoreGeo, A.drifterCoreMat);
-      const legs = new THREE.LineSegments(A.drifterLegsGeo, A.drifterLegsMat);
-      const glow = new THREE.Sprite(A.drifterGlowMat);
+      spinner.scale.setScalar(BUFF_SCALE);
+    } else if (kind === 'hunter') {
+      // Мина-охотник: шипастое ядро + два тонких светящихся кольца-кромки
+      const core = new THREE.Mesh(A.hunterCoreGeo, A.hunterCoreMat);
+      const spikes = new THREE.Mesh(A.hunterSpikeGeo, A.hunterSpikeMat);
+      const ringA = new THREE.Mesh(A.hunterRingGeo, A.hunterRingMat);
+      const ringB = new THREE.Mesh(A.hunterRingGeo, A.hunterRingMat);
+      ringB.rotation.y = Math.PI / 2;
+      const glow = new THREE.Sprite(A.hunterGlowMat);
       glow.scale.setScalar(2.3);
-      spinner.add(core, legs, glow);
+      spinner.add(core, spikes, ringA, ringB, glow);
+      spinner.scale.setScalar(OBST_SCALE);
       radius = PLAYER_R + 0.05;
     } else {
-      const cell = new THREE.Mesh(A.overCellGeo, A.overCellMat);
-      const cap = new THREE.Mesh(A.overCapGeo, A.overCapMat);
-      cap.position.y = 0.36;
-      const ring = new THREE.Mesh(A.overRingGeo, A.overRingMat);
-      ring.rotation.x = Math.PI / 2;
+      // Перезарядка: батарея с тремя зелёными секциями заряда и контактом
+      const body = new THREE.Mesh(A.battBodyGeo, A.battBodyMat);
+      const edges = new THREE.LineSegments(A.battEdgesGeo, A.battEdgeMat);
+      const tip = new THREE.Mesh(A.battTipGeo, A.battTipMat);
+      tip.position.x = 0.55;
+      const bars = [-0.29, 0, 0.29].map((x) => {
+        const b = new THREE.Mesh(A.battBarGeo, A.battBarMat);
+        b.position.set(x, 0, 0.16);
+        return b;
+      });
       const glow = new THREE.Sprite(A.overGlowMat);
-      glow.scale.setScalar(2.4);
-      spinner.add(cell, cap, ring, glow);
+      glow.scale.setScalar(2.6);
+      spinner.add(glow, body, edges, tip, ...bars);
+      spinner.scale.setScalar(BUFF_SCALE);
     }
 
     this.world.add(g);
@@ -1630,7 +1748,7 @@ export class Engine {
       const nd = 2 + Math.floor(d * 2.5);
       for (let i = 0; i < nd; i++) {
         const da = a0 + i * 1.25;
-        this.makeEntity('drifter', da, base - i * 10.5);
+        this.makeEntity('hunter', da, base - i * 10.5);
         if (i % 2 === 1) this.makeEntity('shard', da + Math.PI * 0.65, base - i * 10.5 - 4);
       }
       for (let i = 0; i < 4; i++) this.makeEntity('orb', a0 + Math.PI + i * 0.26, base - 3 - i * 3.0);
@@ -1642,7 +1760,7 @@ export class Engine {
       this.makeEntity(buffKind, a0, base - 4);
       this.makeEntity('shard', a0 + 0.56, base);
       this.makeEntity('shard', a0 - 0.56, base);
-      if (d > 0.4) this.makeEntity('drifter', a0 + Math.PI, base - 9);
+      if (d > 0.4) this.makeEntity('hunter', a0 + Math.PI, base - 9);
       for (let i = 0; i < 3; i++) this.makeEntity('orb', a0, base - 9 - i * 3.0);
       this.spawnT = 1.15;
     }
@@ -1667,7 +1785,10 @@ export class Engine {
 
   private showPopup(text: string, color: number, at: THREE.Vector3, big = false) {
     let slot = this.popups.find((p) => p.life <= 0);
-    if (!slot) slot = this.popups[Math.floor(Math.random() * this.popups.length)];
+    if (!slot) {
+      // все заняты — заменяем самую старую
+      slot = this.popups.reduce((a, b) => (a.life < b.life ? a : b));
+    }
     const c = slot.ctx;
     const hex = '#' + color.toString(16).padStart(6, '0');
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -1684,6 +1805,7 @@ export class Engine {
     const px = (POP_W - pw) / 2;
     const py = (POP_H - ph) / 2;
 
+    // Чистая плашка: тёмная подложка и цветная рамка — без лишних вставок и символов
     c.fillStyle = 'rgba(6,8,22,0.92)';
     roundRectPath(c, px, py, pw, ph, 20);
     c.fill();
@@ -1692,19 +1814,28 @@ export class Engine {
     c.lineWidth = 4;
     roundRectPath(c, px, py, pw, ph, 20);
     c.stroke();
-    c.fillStyle = hex;
-    c.fillRect(px + 12, py + 12, 5, ph - 24);
 
     c.fillStyle = '#ffffff';
     c.fillText(text, POP_W / 2, POP_H / 2 + (big ? 5 : 3));
 
     slot.tex.needsUpdate = true;
-    slot.w = big ? 4.4 : 3.35;
-    slot.h = big ? 1.22 : 0.92;
+    // плашки чуть меньше прежних
+    slot.w = big ? 3.7 : 2.85;
+    slot.h = big ? 1.03 : 0.78;
     slot.sprite.scale.set(slot.w, slot.h, 1);
     slot.sprite.visible = true;
-    slot.sprite.position.set(at.x + (Math.random() - 0.5) * 0.7, at.y + 1.25, at.z - 2.6);
-    slot.maxLife = slot.life = big ? 1.2 : 0.9;
+
+    // Не накладываем плашки друг на друга: поднимаем новую над уже висящими
+    const x = at.x + (Math.random() - 0.5) * 0.5;
+    let y = at.y + 1.25;
+    for (let tries = 0; tries < 4; tries++) {
+      const busy = this.popups.some((o) => o !== slot && o.life > 0 && Math.abs(o.sprite.position.y - y) < slot.h * 0.95);
+      if (!busy) break;
+      y += slot.h * 1.05;
+    }
+    slot.sprite.position.set(x, y, at.z - 2.6);
+    // читаемость: ~1 секунда сверху к прежнему времени показа
+    slot.maxLife = slot.life = big ? 2.2 : 1.9;
   }
 
   private setShieldOpacity(k: number) {
@@ -2018,8 +2149,11 @@ export class Engine {
         culled = true;
         continue;
       }
-      if (this.magnetT > 0 && e.kind === 'orb' && e.z > -48) {
-        e.angle += wrapAngle(this.playerAngle - e.angle) * Math.min(1, dt * 6.8);
+      if (this.magnetT > 0 && e.kind === 'orb' && e.z > -58) {
+        // выстраиваются под героем на 60% быстрее и сами подтягиваются чуть ближе
+        e.angle += wrapAngle(this.playerAngle - e.angle) * Math.min(1, dt * 6.8 * 1.6);
+        const pull = Math.min(1, (e.z + 58) / 30);
+        e.z += move * 0.2 * pull;
       }
       const ea = this.effAngleOf(e);
       this.placeEntity(e, ea);
@@ -2029,15 +2163,18 @@ export class Engine {
         e.mesh.scale.setScalar(1 + Math.sin(e.spin * 3.2) * 0.12);
       } else if (e.kind === 'wall') {
         e.mesh.rotation.z = e.angle + e.spin * WALL_SPIN - WALL_ARC / 2;
-      } else if (e.kind === 'drifter') {
+      } else if (e.kind === 'hunter') {
         const da = wrapAngle(this.playerAngle - e.angle);
         const homing = e.z > -48 ? 1.04 : 0.44;
         e.angle += Math.max(-0.68, Math.min(0.68, da)) * dt * homing;
         const sp = e.spinner ?? e.mesh;
-        sp.rotation.z = Math.sin(e.spin * 3) * 0.4;
-        sp.rotation.y += dt * 1.5;
+        sp.rotation.x += dt * 1.3;
+        sp.rotation.y += dt * 1.9;
       } else if (e.kind === 'overcharge') {
-        (e.spinner ?? e.mesh).rotation.set(0, e.spin * 1.6, 0);
+        // батарея покачивается: заряд всегда читается лицом к игроку
+        (e.spinner ?? e.mesh).rotation.set(0.12, Math.sin(e.spin * 1.4) * 0.7, Math.sin(e.spin * 0.9) * 0.1);
+      } else if (e.kind === 'flash') {
+        (e.spinner ?? e.mesh).rotation.set(0, Math.sin(e.spin * 1.5) * 0.65, 0);
       } else {
         (e.spinner ?? e.mesh).rotation.set(e.spin, e.spin * (e.kind === 'shard' ? 0.7 : 1.3), 0);
       }
@@ -2045,7 +2182,7 @@ export class Engine {
       const dz = Math.abs(e.z);
       if (dz < 1.35) {
         const da = Math.abs(wrapAngle(ea - this.playerAngle));
-        const hit = e.kind === 'wall' ? da < WALL_ARC / 2 - 0.08 : da < (e.kind === 'orb' ? 0.27 : 0.28);
+        const hit = e.kind === 'wall' ? da < WALL_ARC / 2 - 0.08 : e.kind === 'orb' ? da < 0.27 : e.kind === 'shard' || e.kind === 'hunter' ? da < 0.28 * OBST_SCALE : da < 0.28 * 1.1;
         if (hit) {
           this.kill(e);
           culled = true;
@@ -2066,7 +2203,7 @@ export class Engine {
             }
             this.sound.pickup(this.combo, this.combo >= 10);
             if (mult === 5 || mult === 10) this.showPopup(`×${mult} КОМБО`, 0xffd166, pPos, mult >= 10);
-          } else if (e.kind === 'shard' || e.kind === 'wall' || e.kind === 'drifter') {
+          } else if (e.kind === 'shard' || e.kind === 'wall' || e.kind === 'hunter') {
             if (this.shield) {
               this.setShield(false);
               this.shieldBreakT = 0.35;
@@ -2097,7 +2234,7 @@ export class Engine {
             let n = 0;
             for (let j = 0; j < this.entities.length; j++) {
               const o = this.entities[j];
-              if (o.alive && (o.kind === 'shard' || o.kind === 'drifter') && o.z > -95) {
+              if (o.alive && (o.kind === 'shard' || o.kind === 'hunter') && o.z > -95) {
                 o.mesh.getWorldPosition(this.tmpV2);
                 this.emit(this.tmpV2, 0x6ef7d8, 3, 0.9);
                 this.kill(o);
@@ -2129,7 +2266,7 @@ export class Engine {
           }
         } else if (
           !e.missed &&
-          ((e.kind === 'shard' && da < 0.64) || (e.kind === 'drifter' && da < 0.64) || (e.kind === 'wall' && da < WALL_ARC / 2 + 0.26))
+          ((e.kind === 'shard' && da < 0.64) || (e.kind === 'hunter' && da < 0.64) || (e.kind === 'wall' && da < WALL_ARC / 2 + 0.26))
         ) {
           e.missed = true;
           this.nearMiss++;
@@ -2182,12 +2319,11 @@ export class Engine {
         p.sprite.visible = false;
         continue;
       }
-      const t = p.life / p.maxLife;
       const age = p.maxLife - p.life;
       const punch = Math.min(1, age / 0.11);
-      p.sprite.position.y += dt * 1.15;
-      p.sprite.position.z += move * 0.55;
-      (p.sprite.material as THREE.SpriteMaterial).opacity = Math.min(1, t * 3.2);
+      // медленный подъём без смещения по глубине — плашка не растёт и остаётся читаемой
+      p.sprite.position.y += dt * 0.38;
+      (p.sprite.material as THREE.SpriteMaterial).opacity = Math.min(1, p.life / 0.5);
       const sc = 0.82 + 0.18 * punch;
       p.sprite.scale.set(p.w * sc, p.h * sc, 1);
     }
@@ -2278,13 +2414,7 @@ export class Engine {
 
     this.flashFx = Math.max(0, this.flashFx - dt * 2.2);
 
-    const trailLerp = Math.min(1, dt * 16);
-    for (let i = this.trail.length - 1; i > 0; i--) {
-      this.trail[i].position.lerp(this.trail[i - 1].position, trailLerp);
-      this.trail[i].position.z += move * 0.4;
-      if (this.trail[i].position.z > 9) this.trail[i].position.copy(this.trail[0].position);
-    }
-    this.trail[0].position.copy(this.player.position).setZ(0.25);
+    this.updateTrail(dt, diff);
 
     this.shake = Math.max(0, this.shake - dt * 3.1);
     const amp = this.shake * 0.4 + (k < 0.18 ? 0.05 : 0);
@@ -2309,6 +2439,36 @@ export class Engine {
     if (this.light <= 0) {
       this.light = 0;
       this.gameOver();
+    }
+  }
+
+  /**
+   * Шлейф искры. Герой «ездит» по окружности тоннеля, поэтому каждое звено цепочки запоминает угол
+   * и догоняет голову с запаздыванием — при движении вбок за искрой тянется изогнутый хвост,
+   * в покое он схлопывается и почти не виден.
+   */
+  private updateTrail(dt: number, diff: number) {
+    const lateral = Math.min(1, Math.abs(diff) * 5.5); // 0..1 — насколько активно мы сейчас смещаемся
+    this.trailVis += (lateral - this.trailVis) * Math.min(1, dt * 9);
+    const lag = 1 - Math.exp(-dt * 13);
+    this.trailAng[0] = this.playerAngle;
+    for (let i = 1; i < this.trail.length; i++) {
+      this.trailAng[i] += wrapAngle(this.trailAng[i - 1] - this.trailAng[i]) * lag;
+    }
+    const baseP = this.player.position;
+    for (let i = 0; i < this.trail.length; i++) {
+      const sp = this.trail[i];
+      const mat = sp.material as THREE.SpriteMaterial;
+      // экранный угол звена: -π/2 + (его угол − текущий угол игрока)
+      const rel = wrapAngle(this.trailAng[i] - this.playerAngle);
+      const a = -Math.PI / 2 + rel;
+      const k = i / this.trail.length;
+      sp.position.set(Math.cos(a) * PLAYER_R, Math.sin(a) * PLAYER_R, 0.2 + i * 0.1);
+      // базовый короткий «дымок» всегда слегка живёт, при движении хвост становится заметнее
+      const vis = i === 0 ? 0 : 0.04 + this.trailVis * 0.96;
+      mat.opacity = Math.max(0, (0.5 - k * 0.42) * vis);
+      sp.visible = i > 0 && mat.opacity > 0.01;
+      if (i === 0) sp.position.copy(baseP);
     }
   }
 
@@ -2373,7 +2533,8 @@ export class Engine {
       if (p.life <= 0) p.sprite.visible = false;
       else p.sprite.position.addScaledVector(p.vel, dt);
     }
-    for (let i = 0; i < this.trail.length; i++) this.trail[i].position.copy(this.player.position);
+    for (let i = 0; i < this.trail.length; i++) this.trail[i].visible = false;
+    this.trailAng.fill(this.playerAngle);
     for (let i = 0; i < this.entities.length; i++) {
       const e = this.entities[i];
       if (!e.alive) continue;

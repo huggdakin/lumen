@@ -14,7 +14,7 @@ export interface WallPalette {
   glass: string;
 }
 
-export type PanelKind = 'pulse' | 'copper' | 'polar' | 'current' | 'prism' | 'corona' | 'crystal' | 'zero';
+export type PanelKind = 'pulse' | 'copper' | 'polar' | 'current' | 'prism' | 'magma' | 'crystal' | 'zero';
 export type RibShape = 'round' | 'octa' | 'hex';
 
 export interface TunnelLook {
@@ -121,20 +121,21 @@ export const TUNNEL_LOOKS: Record<string, TunnelLook> = {
     streak: { color: 0xffa0ee, gain: 1 },
     windows: 0,
   },
-  // 6. Солнечная корона — золото, бронза, яркий центр и лучи
-  corona: {
-    panel: 'corona',
-    ribPattern: 'GmsmMmsmGmsmMmsx',
+  // 6. Жерло вулкана — раскалённый базальт, жилы лавы, тлеющие красно-оранжевые рёбра
+  magma: {
+    panel: 'magma',
+    ribPattern: 'GmsxMmsmGxsmMmsx',
     ribShape: 'round',
-    ribColors: { body: 0x24150a, edge: 0xffd35a, accent: 0xffb020, dim: 0x8a5a1c },
-    halo: 0.05,
-    beams: { count: 8, width: 0.04 },
-    ambient: { color: 0xffd890, intensity: 1.0 },
-    playerLight: 1,
-    fog: 0.0115,
-    core: { color: 0xffd35a, size: 14, opacity: 0.9, rays: 0.55, ring: 0 },
-    dust: { n: 48, size: 0.07, opacity: 0.4, colors: [0xffe090, 0xfff2c0] },
-    streak: { color: 0xffd35a, gain: 1 },
+    ribColors: { body: 0x2a0d07, edge: 0xff5a1f, accent: 0xff8a2a, dim: 0x7a2a12 },
+    halo: 0.09,
+    hueSway: { from: 0.005, to: 0.075, speed: 0.5 },
+    beams: { count: 7, width: 0.04 },
+    ambient: { color: 0xff9a70, intensity: 1.0 },
+    playerLight: 1.05,
+    fog: 0.0125,
+    core: { color: 0xff5a1a, size: 13, opacity: 0.85, rays: 0.35, ring: 0.5 },
+    dust: { n: 64, size: 0.08, opacity: 0.55, colors: [0xff8a3a, 0xffc060, 0xff5a20] },
+    streak: { color: 0xff7a30, gain: 1 },
     windows: 0,
   },
   // 7. Кристальный разлом — кристаллические панели, ледяные блики
@@ -644,50 +645,108 @@ const paintPrism: Painter = (c, p) => {
   floorShade(c, 0.5);
 };
 
-const paintCorona: Painter = (c, p) => {
-  hGrad(c, [[0, p.c], [0.3, p.a], [0.5, p.b], [0.7, p.a], [1, p.c]]);
-  for (let col = 0; col < 16; col++) {
-    for (let row = 0; row < 16; row++) {
-      const x = col * CELL + 2;
-      const y = row * CELL + 2;
-      const g = c.createLinearGradient(0, y, 0, y + CELL - 4);
-      g.addColorStop(0, 'rgba(255,200,120,0.07)');
-      g.addColorStop(1, 'rgba(0,0,0,0.25)');
-      c.fillStyle = g;
-      rrect(c, x, y, CELL - 4, CELL - 4, 4);
-      c.fill();
+const paintMagma: Painter = (c, p) => {
+  const rnd = mulberry(6606);
+  // Жидкая лава в «зазорах» между плитами: тёмно-красная заливка с горячим центром у потолка
+  hGrad(c, [[0, '#2a0703'], [0.3, '#5a1306'], [0.5, '#7a1d08'], [0.7, '#5a1306'], [1, '#2a0703']]);
+  const COLS = 16;
+  const ROWS = 16;
+  const V = jitterGrid(COLS, ROWS, 15, () => 13, 4041);
+
+  type Pt = [number, number];
+  const inView = (pts: Pt[], dx: number, dy: number) =>
+    pts.some(([x, y]) => x + dx > -24 && x + dx < TW + 24 && y + dy > -24 && y + dy < TH + 24);
+
+  const cells: { v: Pt[]; shade: number; heat: number }[] = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let q = 0; q < COLS; q++) {
+      cells.push({
+        v: [V(r, q), V(r, q + 1), V(r + 1, q + 1), V(r + 1, q)],
+        shade: rnd(),
+        heat: rnd(),
+      });
     }
   }
-  // Мягкие золотые лучи вдоль тоннеля
-  for (let col = 1; col < 16; col += 2) {
-    const x = col * CELL;
-    glowLine(c, x, 0, x, TH, p.cool, 2, 0.18 * ceilK(x), 10);
+
+  // 1) Базальтовые плиты, чуть сжатые к центру — между ними остаётся светящаяся щель
+  for (const cell of cells) {
+    const cx = (cell.v[0][0] + cell.v[1][0] + cell.v[2][0] + cell.v[3][0]) / 4;
+    const cy = (cell.v[0][1] + cell.v[1][1] + cell.v[2][1] + cell.v[3][1]) / 4;
+    const fk = ceilK(cx);
+    for (const dy of [-TH, 0, TH]) {
+      for (const dx of [-TW, 0, TW]) {
+        if (!inView(cell.v, dx, dy)) continue;
+        c.save();
+        c.translate(dx, dy);
+        const g = c.createLinearGradient(cx, cy - 34, cx, cy + 34);
+        const l = (5 + cell.shade * 7) * (0.6 + 0.4 * fk);
+        g.addColorStop(0, `hsl(10,32%,${l + 4}%)`);
+        g.addColorStop(1, `hsl(8,38%,${Math.max(2, l - 2)}%)`);
+        c.fillStyle = g;
+        c.beginPath();
+        cell.v.forEach(([x, y], i) => {
+          const px = cx + (x - cx) * 0.9;
+          const py = cy + (y - cy) * 0.9;
+          if (i === 0) c.moveTo(px, py);
+          else c.lineTo(px, py);
+        });
+        c.closePath();
+        c.fill();
+        // тёплый блик на верхней грани плиты
+        c.strokeStyle = 'rgba(255,150,90,0.1)';
+        c.lineWidth = 1;
+        c.stroke();
+        c.restore();
+      }
+    }
   }
-  // Золотые сегменты: широкие на чётных границах, узкие на нечётных
+
+  // 2) Горячие жилы: яркие рёбра ячеек, часть из них сильно раскалена
+  for (const cell of cells) {
+    const [a, b, , d] = cell.v;
+    const hot = cell.heat > 0.62;
+    const edges: [Pt, Pt][] = [[a, b], [a, d]];
+    for (const [p0, p1] of edges) {
+      const k = ceilK((p0[0] + p1[0]) / 2);
+      for (const dy of [-TH, 0, TH]) {
+        for (const dx of [-TW, 0, TW]) {
+          if (!inView([p0, p1], dx, dy)) continue;
+          glowLine(c, p0[0] + dx, p0[1] + dy, p1[0] + dx, p1[1] + dy, hot ? '#ffb347' : '#ff5a1f', hot ? 2.4 : 1.6, (hot ? 0.95 : 0.5) * (0.5 + 0.5 * k), hot ? 12 : 6);
+        }
+      }
+    }
+  }
+
+  // 3) Рёберные линии секций — пояса раскалённого металла
   for (let b = 0; b <= BAYS; b++) {
     const y = b * BAY;
     const strong = b % 2 === 0;
-    const hh = strong ? 13 : 6;
+    const hh = strong ? 15 : 7;
     const band = (yy: number) => {
+      const g = c.createLinearGradient(0, yy - hh * 2.2, 0, yy + hh * 2.2);
+      g.addColorStop(0, rgba('#ff4a14', 0));
+      g.addColorStop(0.5, rgba('#ff4a14', strong ? 0.32 : 0.16));
+      g.addColorStop(1, rgba('#ff4a14', 0));
+      c.fillStyle = g;
+      c.fillRect(0, yy - hh * 2.2, TW, hh * 4.4);
       for (let col = 0; col < 16; col++) {
-        const x = col * CELL + 3;
-        const k = ceilK(x + 29);
+        const x = col * CELL + 4;
+        const k = ceilK(x + 28);
         c.save();
-        c.globalAlpha = (strong ? 0.3 : 0.2) + (strong ? 0.5 : 0.3) * k;
-        c.shadowColor = p.cool;
-        c.shadowBlur = strong ? 14 : 4;
-        const g = c.createLinearGradient(0, yy - hh, 0, yy + hh);
-        g.addColorStop(0, '#6a4210');
-        g.addColorStop(0.5, p.cool);
-        g.addColorStop(0.75, '#d99a1e');
-        g.addColorStop(1, '#6a4210');
-        c.fillStyle = g;
-        // скошенные сегменты
+        c.globalAlpha = (strong ? 0.4 : 0.25) + (strong ? 0.5 : 0.3) * k;
+        c.shadowColor = '#ff5a1f';
+        c.shadowBlur = strong ? 14 : 5;
+        const gg = c.createLinearGradient(0, yy - hh, 0, yy + hh);
+        gg.addColorStop(0, '#5a1204');
+        gg.addColorStop(0.5, '#ff6a24');
+        gg.addColorStop(0.75, '#ffb040');
+        gg.addColorStop(1, '#5a1204');
+        c.fillStyle = gg;
         c.beginPath();
-        c.moveTo(x + 5, yy - hh);
-        c.lineTo(x + CELL - 11, yy - hh);
-        c.lineTo(x + CELL - 6, yy + hh);
-        c.lineTo(x, yy + hh);
+        c.moveTo(x + 2, yy - hh);
+        c.lineTo(x + CELL - 10, yy - hh);
+        c.lineTo(x + CELL - 4, yy + hh);
+        c.lineTo(x - 2, yy + hh);
         c.closePath();
         c.fill();
         c.restore();
@@ -696,7 +755,8 @@ const paintCorona: Painter = (c, p) => {
     band(y);
     if (y === 0) band(TH);
   }
-  floorShade(c, 0.5);
+  void p;
+  floorShade(c, 0.55);
 };
 
 const paintCrystal: Painter = (c, p) => {
@@ -894,7 +954,7 @@ const PAINTERS: Record<PanelKind, Painter> = {
   polar: paintPolar,
   current: paintCurrent,
   prism: paintPrism,
-  corona: paintCorona,
+  magma: paintMagma,
   crystal: paintCrystal,
   zero: paintZero,
 };
@@ -970,11 +1030,11 @@ function ringGeo(shape: RibShape, apothem: number, tube: number, radial = 6): TH
 export function buildRibGeos(look: TunnelLook, tunnelR: number): RibGeos {
   const shape = look.ribShape;
   const R = shape === 'hex' ? tunnelR - 0.22 : shape === 'octa' ? tunnelR - 0.05 : tunnelR + 0.02;
-  const segN = look.panel === 'corona' ? 12 : 16;
+  const segN = look.panel === 'magma' ? 12 : 16;
   const arcs: THREE.BufferGeometry[] = [];
   for (let i = 0; i < segN; i++) {
     const step = (Math.PI * 2) / segN;
-    const g = new THREE.TorusGeometry(tunnelR, look.panel === 'corona' ? 0.1 : 0.085, 5, 4, step * 0.64);
+    const g = new THREE.TorusGeometry(tunnelR, look.panel === 'magma' ? 0.1 : 0.085, 5, 4, step * 0.64);
     g.rotateZ(i * step);
     arcs.push(g);
   }
@@ -1141,13 +1201,13 @@ export function renderThemePreview(t: Theme): string {
     c.fill('evenodd');
 
     // грани для призмы / кристалла
-    if (look.panel === 'prism' || look.panel === 'crystal') {
+    if (look.panel === 'prism' || look.panel === 'crystal' || look.panel === 'magma') {
       for (let s = 0; s < SECT; s++) {
         const a0 = (s / SECT) * Math.PI * 2;
         const a1 = ((s + 1) / SECT) * Math.PI * 2;
-        const hueBase = look.panel === 'prism' ? 268 + ((s * 5 + i * 3) % 11) * 4.6 : 205 + rnd() * 20;
-        const light = look.panel === 'prism' ? 12 + rnd() * 14 : 20 + rnd() * 34;
-        const sat = look.panel === 'prism' ? 62 : 55;
+        const hueBase = look.panel === 'prism' ? 268 + ((s * 5 + i * 3) % 11) * 4.6 : look.panel === 'magma' ? 6 + rnd() * 14 : 205 + rnd() * 20;
+        const light = look.panel === 'prism' ? 12 + rnd() * 14 : look.panel === 'magma' ? 5 + rnd() * 9 : 20 + rnd() * 34;
+        const sat = look.panel === 'prism' ? 62 : look.panel === 'magma' ? 45 : 55;
         if (look.panel === 'crystal' && rnd() < 0.12) continue;
         c.fillStyle = `hsla(${hueBase},${sat}%,${light}%,${0.7 * (1 - fog * 0.6)})`;
         c.beginPath();
@@ -1157,7 +1217,16 @@ export function renderThemePreview(t: Theme): string {
         c.lineTo(cx + Math.cos(a1) * rFar, cy + Math.sin(a1) * rFar);
         c.closePath();
         c.fill();
-        if (rnd() < 0.18) {
+        if (look.panel === 'magma') {
+          // жилы лавы между плитами
+          c.save();
+          c.strokeStyle = rnd() < 0.3 ? 'rgba(255,190,80,0.95)' : 'rgba(255,90,30,0.8)';
+          c.shadowColor = '#ff5a1f';
+          c.shadowBlur = 4;
+          c.lineWidth = 0.9;
+          c.stroke();
+          c.restore();
+        } else if (rnd() < 0.18) {
           c.strokeStyle = look.panel === 'prism' ? 'rgba(255,190,250,0.55)' : 'rgba(255,255,255,0.7)';
           c.lineWidth = 0.8;
           c.stroke();

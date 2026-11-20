@@ -236,7 +236,7 @@ export function InfoOverlay({
   const rows: { icon: React.ReactNode; name: string; text: string; tone: string }[] = [
     { icon: <Sparkles size={15} />, name: 'Светлячок', text: '+12% света, комбо до ×10', tone: 'text-ember-200' },
     { icon: <Shield size={15} />, name: 'Тёмный осколок', text: '−26% света и сброс комбо', tone: 'text-hot-300' },
-    { icon: <Zap size={15} />, name: 'Вспышка', text: 'сжигает осколки и дрейфунов впереди', tone: 'text-sonar-300' },
+    { icon: <Zap size={15} />, name: 'Вспышка', text: 'сжигает осколки и мины-охотники впереди', tone: 'text-sonar-300' },
     { icon: <Magnet size={15} />, name: 'Магнит', text: 'несколько секунд тянет свет к тебе', tone: 'text-myst-300' },
     { icon: <Target size={15} />, name: 'Впритирку', text: 'прошёл рядом с препятствием — +25 очков', tone: 'text-white' },
     { icon: <Wind size={15} />, name: 'Поток', text: '3 риска подряд → 6 секунд ×1.5 очков', tone: 'text-sonar-200' },
